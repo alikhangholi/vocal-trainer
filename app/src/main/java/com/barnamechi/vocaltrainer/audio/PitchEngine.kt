@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import com.barnamechi.vocaltrainer.music.Notes
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -19,15 +21,19 @@ import kotlin.math.sqrt
  */
 class PitchEngine(private val onPitch: (Float) -> Unit) {
     private companion object {
-        const val RMS_FLOOR = 0.02f          // ignore quiet frames
-        const val MIN_CONFIDENCE = 0.88f     // normalized peak c[maxpos]/c[0]
-        const val STABLE_FRAMES = 3          // same semitone this many frames before we report it
-        const val HOLD_FRAMES = 6            // keep last stable note over ~0.28 s of dropout
+        // Tuned for a *sung* vowel: vibrato, breath and room noise put a real voice around
+        // 0.7-0.85 confidence. Tighter than this and only a synth tone gets through.
+        const val RMS_FLOOR = 0.012f         // ignore quiet frames
+        const val MIN_CONFIDENCE = 0.70f     // normalized peak c[maxpos]/c[0]
+        const val STABLE_FRAMES = 2          // same semitone this many frames before we report it
+        const val HOLD_FRAMES = 4            // keep last stable note over ~0.19 s of dropout
     }
 
     private val sampleRate = 44100
     private var thread: Thread? = null
     @Volatile private var running = false
+    private var aec: AcousticEchoCanceler? = null
+    private var ns: NoiseSuppressor? = null
 
     // stabilizer state (audio thread only)
     private var candidateMidi = Int.MIN_VALUE
@@ -42,9 +48,10 @@ class PitchEngine(private val onPitch: (Float) -> Unit) {
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
         val bufSize = maxOf(minBuf, 4096)
-        // UNPROCESSED avoids AGC/noise-gate pumping; not every device offers it.
+        // VOICE_COMMUNICATION first: it is the source the platform wires echo cancellation to, so
+        // the app's own piano coming out of the speaker gets cancelled instead of detected.
         val sources = intArrayOf(
-            MediaRecorder.AudioSource.UNPROCESSED,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
             MediaRecorder.AudioSource.MIC
         )
@@ -60,6 +67,15 @@ class PitchEngine(private val onPitch: (Float) -> Unit) {
             r.release()
         }
         val recorder = rec ?: return false
+        // Echo cancellation / noise suppression on this capture session, where the device offers it.
+        runCatching {
+            if (AcousticEchoCanceler.isAvailable()) {
+                aec = AcousticEchoCanceler.create(recorder.audioSessionId)?.apply { enabled = true }
+            }
+            if (NoiseSuppressor.isAvailable()) {
+                ns = NoiseSuppressor.create(recorder.audioSessionId)?.apply { enabled = true }
+            }
+        }
         recorder.startRecording()
         running = true
         candidateMidi = Int.MIN_VALUE
@@ -83,7 +99,13 @@ class PitchEngine(private val onPitch: (Float) -> Unit) {
         return true
     }
 
-    fun stop() { running = false; thread?.join(200); thread = null }
+    fun stop() {
+        running = false
+        thread?.join(200)
+        thread = null
+        runCatching { aec?.release() }; aec = null
+        runCatching { ns?.release() }; ns = null
+    }
 
     /**
      * Requires the same semitone on [STABLE_FRAMES] consecutive frames before reporting it, and

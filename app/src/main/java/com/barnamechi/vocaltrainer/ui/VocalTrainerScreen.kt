@@ -1,9 +1,15 @@
 package com.barnamechi.vocaltrainer.ui
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -35,6 +43,13 @@ private val Coral = Color(0xFFEF7D68)
 private val TextC = Color(0xFFEFEAFF)
 private val Muted = Color(0xFFA99FCF)
 
+/** Snappy, slightly bouncy key-press feedback. */
+private val keyPressSpring = spring<Float>(
+    dampingRatio = 0.6f, stiffness = Spring.StiffnessHigh
+)
+
+private val BPM_CHOICES = listOf(60, 72, 84, 96, 120)
+
 @Composable
 fun VocalTrainerScreen(
     detectedMidi: Int?,
@@ -45,10 +60,15 @@ fun VocalTrainerScreen(
     onKeyDown: (Int, Boolean) -> Unit,
     onKeyUp: (Boolean) -> Unit,
     onToggleListen: () -> Unit,
+    metronomeOn: Boolean,
+    bpm: Int,
+    onToggleMetronome: () -> Unit,
+    onBpmChange: (Int) -> Unit,
 ) {
     var solfege by remember { mutableStateOf(false) }
     var sustain by remember { mutableStateOf(false) }
     var latched by remember { mutableStateOf<Int?>(null) }
+    val keyboardScroll = rememberScrollState()
 
     Column(
         Modifier
@@ -80,6 +100,7 @@ fun VocalTrainerScreen(
             detectedMidi = detectedMidi,
             latched = latched,
             solfege = solfege,
+            scroll = keyboardScroll,
             onPress = { m ->
                 if (sustain) {
                     if (latched == m) { onKeyUp(true); latched = null }
@@ -89,7 +110,19 @@ fun VocalTrainerScreen(
             onRelease = { if (!sustain) onKeyUp(false) } // damper
         )
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(10.dp))
+        // 44.dp per white key, same as Keyboard's own layout
+        KeyboardOverview(
+            scroll = keyboardScroll,
+            contentWidth = 44.dp * (Notes.LOW..Notes.HIGH).count { !Notes.isBlack(it) },
+            detectedMidi = detectedMidi,
+            latched = latched,
+        )
+
+        Spacer(Modifier.height(18.dp))
+        MetronomeBar(metronomeOn, bpm, onToggleMetronome, onBpmChange)
+
+        Spacer(Modifier.height(18.dp))
         MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, onToggleListen)
     }
 }
@@ -120,6 +153,7 @@ private fun Keyboard(
     detectedMidi: Int?,
     latched: Int?,
     solfege: Boolean,
+    scroll: ScrollState,
     onPress: (Int) -> Unit,
     onRelease: () -> Unit,
 ) {
@@ -128,7 +162,6 @@ private fun Keyboard(
     val whites = (Notes.LOW..Notes.HIGH).filter { !Notes.isBlack(it) }
     val totalW = whiteW * whites.size
 
-    val scroll = rememberScrollState()
     val density = LocalDensity.current
     LaunchedEffect(Unit) {
         val whitesBeforeC4 = whites.count { it < Notes.MIDDLE_C }
@@ -154,17 +187,37 @@ private fun Keyboard(
                 val whitesBefore = whites.count { it < m }
                 val x = whiteW * whitesBefore - blackW / 2
                 val lit = detectedMidi == m || latched == m
+                var pressed by remember(m) { mutableStateOf(false) }
+                val dip by animateFloatAsState(if (pressed) 1f else 0f, keyPressSpring, label = "blackDip")
+                val shape = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp)
                 Box(
                     Modifier
                         .offset(x = x)
                         .width(blackW).height(94.dp)
-                        .clip(RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp))
-                        .background(if (lit) Mint else Color(0xFF241A3A))
-                        .border(1.dp, Color(0xFF0E0820), RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp))
+                        .graphicsLayer {
+                            scaleY = 1f - 0.045f * dip
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                        }
+                        .clip(shape)
+                        .background(
+                            when {
+                                lit -> Mint
+                                else -> lerp(Color(0xFF241A3A), Color(0xFF4A3A75), dip)
+                            }
+                        )
+                        .border(1.dp, Color(0xFF0E0820), shape)
                         .pointerInput(m) {
-                            detectTapGestures(onPress = {
-                                onPress(m); tryAwaitRelease(); onRelease()
-                            })
+                            // fires on touch-down (no tap/drag disambiguation delay); left
+                            // unconsumed so a drag can still scroll the keyboard, which cancels
+                            // the gesture and releases the note
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                pressed = true
+                                onPress(m)
+                                waitForUpOrCancellation()
+                                pressed = false
+                                onRelease()
+                            }
                         }
                 )
             }
@@ -177,14 +230,30 @@ private fun WhiteKey(
     m: Int, w: androidx.compose.ui.unit.Dp, lit: Boolean, solfege: Boolean,
     onPress: (Int) -> Unit, onRelease: () -> Unit,
 ) {
+    var pressed by remember(m) { mutableStateOf(false) }
+    val dip by animateFloatAsState(if (pressed) 1f else 0f, keyPressSpring, label = "whiteDip")
+    val shape = RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp)
     Box(
         Modifier
             .width(w).height(150.dp)
-            .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
-            .background(if (lit) Mint else Color(0xFFF3EEFF))
-            .border(1.dp, Color(0xFFB9ADDE), RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
+            .graphicsLayer {
+                scaleY = 1f - 0.03f * dip
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+            }
+            .clip(shape)
+            .background(if (lit) Mint else lerp(Color(0xFFF3EEFF), Color(0xFFC8BCEA), dip))
+            .border(1.dp, Color(0xFFB9ADDE), shape)
             .pointerInput(m) {
-                detectTapGestures(onPress = { onPress(m); tryAwaitRelease(); onRelease() })
+                // fires on touch-down (no tap/drag disambiguation delay); left unconsumed so a
+                // drag can still scroll the keyboard, which cancels the gesture and releases
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    pressed = true
+                    onPress(m)
+                    waitForUpOrCancellation()
+                    pressed = false
+                    onRelease()
+                }
             },
         contentAlignment = Alignment.BottomCenter
     ) {
@@ -197,6 +266,136 @@ private fun WhiteKey(
             color = Color(0xFF6B5FA0), fontSize = 9.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 6.dp)
         )
+    }
+}
+
+/**
+ * Where you are in the full C2-C6 keyboard: every key as a tick, the visible slice as a bright
+ * window, plus markers for the note you're playing (Honey) and the note you're singing (Mint).
+ */
+@Composable
+private fun KeyboardOverview(
+    scroll: ScrollState,
+    contentWidth: androidx.compose.ui.unit.Dp,
+    detectedMidi: Int?,
+    latched: Int?,
+) {
+    val span = (Notes.HIGH - Notes.LOW).toFloat()
+    val contentPx = with(LocalDensity.current) { contentWidth.toPx() }
+    Column {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth().height(26.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF2C2250))
+                .border(1.dp, Line, RoundedCornerShape(8.dp))
+        ) {
+            val fullW = maxWidth
+            // viewport = content - maxScroll, so the window is that share of the strip
+            val visibleFrac =
+                if (scroll.maxValue > 0 && contentPx > 0f) (contentPx - scroll.maxValue) / contentPx else 1f
+            val windowW = fullW * visibleFrac.coerceIn(0.08f, 1f)
+            val startFrac = if (scroll.maxValue > 0) scroll.value.toFloat() / scroll.maxValue else 0f
+            Box(
+                Modifier
+                    .offset(x = (fullW - windowW) * startFrac.coerceIn(0f, 1f))
+                    .width(windowW).fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Honey.copy(alpha = 0.18f))
+                    .border(1.dp, Honey.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            )
+            // one tick per key; octave C's are taller and brighter
+            (Notes.LOW..Notes.HIGH).forEach { m ->
+                val f = (m - Notes.LOW) / span
+                val isC = m % 12 == 0
+                Box(
+                    Modifier
+                        .offset(x = fullW * f)
+                        .align(Alignment.CenterStart)
+                        .width(1.dp)
+                        .height(if (isC) 16.dp else if (Notes.isBlack(m)) 7.dp else 10.dp)
+                        .background(if (isC) Muted else Line)
+                )
+            }
+            latched?.let { m ->
+                Marker(fullW * ((m - Notes.LOW) / span), Honey)
+            }
+            detectedMidi?.let { m ->
+                if (m in Notes.LOW..Notes.HIGH) Marker(fullW * ((m - Notes.LOW) / span), Mint)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(Notes.name(Notes.LOW), color = Muted, fontSize = 10.sp)
+            Text("full keyboard – drag the keys to move", color = Muted, fontSize = 10.sp)
+            Text(Notes.name(Notes.HIGH), color = Muted, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.Marker(x: androidx.compose.ui.unit.Dp, color: Color) {
+    Box(
+        Modifier
+            .offset(x = x - 3.dp)
+            .align(Alignment.Center)
+            .size(6.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(color)
+    )
+}
+
+/** Metronome: on/off plus a few standard tempos. */
+@Composable
+private fun MetronomeBar(on: Boolean, bpm: Int, onToggle: () -> Unit, onBpmChange: (Int) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface)
+            .border(1.dp, Line, RoundedCornerShape(18.dp))
+            .padding(16.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Metronome", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("$bpm BPM · accent every 4 beats", color = Muted, fontSize = 12.sp)
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) Coral else Honey)
+                    .clickable { onToggle() }
+                    .padding(horizontal = 18.dp, vertical = 9.dp)
+            ) {
+                Text(
+                    if (on) "Stop" else "Start",
+                    color = if (on) Color(0xFF2A0D08) else Color(0xFF241A05),
+                    fontSize = 14.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BPM_CHOICES.forEach { choice ->
+                val selected = choice == bpm
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Honey else Color(0xFF2C2250))
+                        .border(1.dp, if (selected) Honey else Line, RoundedCornerShape(10.dp))
+                        .clickable { onBpmChange(choice) }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$choice",
+                        color = if (selected) Color(0xFF241A05) else Muted,
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
     }
 }
 

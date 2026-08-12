@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import com.barnamechi.vocaltrainer.audio.Metronome
 import com.barnamechi.vocaltrainer.audio.PitchEngine
 import com.barnamechi.vocaltrainer.audio.ToneEngine
 import com.barnamechi.vocaltrainer.music.Notes
@@ -16,6 +17,7 @@ import com.barnamechi.vocaltrainer.ui.VocalTrainerScreen
 class MainActivity : ComponentActivity() {
 
     private lateinit var tone: ToneEngine
+    private val metronome = Metronome()
     private var pitch: PitchEngine? = null
 
     private val detectedMidi = mutableStateOf<Int?>(null)
@@ -23,6 +25,8 @@ class MainActivity : ComponentActivity() {
     private val listening = mutableStateOf(false)
     private val loMidi = mutableStateOf<Int?>(null)
     private val hiMidi = mutableStateOf<Int?>(null)
+    private val metronomeOn = mutableStateOf(false)
+    private val bpm = mutableStateOf(60)
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -46,6 +50,16 @@ class MainActivity : ComponentActivity() {
                 },
                 onKeyUp = { sustain -> if (sustain) tone.noteOff() else tone.damp() },
                 onToggleListen = { if (listening.value) stopListening() else requestMic() },
+                metronomeOn = metronomeOn.value,
+                bpm = bpm.value,
+                onToggleMetronome = {
+                    if (metronomeOn.value) { metronome.stop(); metronomeOn.value = false }
+                    else { metronome.start(bpm.value); metronomeOn.value = true }
+                },
+                onBpmChange = { v ->
+                    bpm.value = v
+                    metronome.setBpm(v)
+                },
             )
         }
     }
@@ -60,6 +74,9 @@ class MainActivity : ComponentActivity() {
         loMidi.value = null
         hiMidi.value = null
         pitch = PitchEngine { f ->
+            // Never let the app's own piano count as "your voice". (The metronome click is too
+            // short to pass the periodicity gate, so it needs no gating and you can sing along.)
+            if (tone.isSounding()) return@PitchEngine
             runOnUiThread {
                 if (f > 60f && f < 1200f) {
                     val m = Math.round(Notes.freqToMidiFloat(f.toDouble())).toInt()
@@ -86,5 +103,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         pitch?.stop()
         tone.stop()
+        metronome.stop()
     }
 }

@@ -3,6 +3,7 @@ package com.barnamechi.vocaltrainer.audio
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.os.Build
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.pow
@@ -28,6 +29,7 @@ class ToneEngine {
         const val RELEASE_SEC = 0.12
         const val MINUS_60_DB = 6.908 // ln(1000)
         const val DEAD = 1e-4
+        const val SELF_SOUND_TAIL_MS = 200L // mic stays gated this long after the last voice dies
     }
 
     private var track: AudioTrack? = null
@@ -50,6 +52,17 @@ class ToneEngine {
     private val voices = Array(VOICES) { Voice() }
     private val lock = Any()
 
+    /** Wall clock of the last buffer that contained sound; used to gate the mic. */
+    @Volatile private var lastSoundingMs = 0L
+
+    /**
+     * True while the app itself is making sound (plus a short tail). The pitch detector uses this
+     * to ignore its own piano coming back through the speaker.
+     */
+    fun isSounding(): Boolean =
+        voices.any { it.active } ||
+            System.currentTimeMillis() - lastSoundingMs < SELF_SOUND_TAIL_MS
+
     fun start() {
         if (running) return
         val minBuf = AudioTrack.getMinBufferSize(
@@ -69,8 +82,13 @@ class ToneEngine {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(minBuf * 2)
+            .setBufferSizeInBytes(minBuf) // smallest safe buffer: keys must sound on touch-down
             .setTransferMode(AudioTrack.MODE_STREAM)
+            .apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                }
+            }
             .build()
         track = t
         t.play()
@@ -80,9 +98,10 @@ class ToneEngine {
         val sr = t.sampleRate.takeIf { it > 0 } ?: REQUESTED_RATE
 
         thread = Thread {
-            val buf = ShortArray(512)
+            val buf = ShortArray(256)
             val nyquist = sr / 2.0
             while (running) {
+                if (voices.any { it.active }) lastSoundingMs = System.currentTimeMillis()
                 for (i in buf.indices) {
                     var mix = 0.0
                     for (v in voices) {
@@ -148,6 +167,7 @@ class ToneEngine {
             v.releasing = false
             v.active = true
         }
+        lastSoundingMs = System.currentTimeMillis()
     }
 
     private fun release(heldVoices: Boolean) {
