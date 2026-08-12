@@ -42,8 +42,8 @@ fun VocalTrainerScreen(
     listening: Boolean,
     loMidi: Int?,
     hiMidi: Int?,
-    onKeyDown: (Int) -> Unit,
-    onKeyUp: () -> Unit,
+    onKeyDown: (Int, Boolean) -> Unit,
+    onKeyUp: (Boolean) -> Unit,
     onToggleListen: () -> Unit,
 ) {
     var solfege by remember { mutableStateOf(false) }
@@ -71,7 +71,7 @@ fun VocalTrainerScreen(
             Spacer(Modifier.width(16.dp))
             ToggleChip("Sustain (hold note)", sustain) {
                 sustain = it
-                if (!it && latched != null) { onKeyUp(); latched = null }
+                if (!it && latched != null) { onKeyUp(true); latched = null }
             }
         }
 
@@ -82,17 +82,21 @@ fun VocalTrainerScreen(
             solfege = solfege,
             onPress = { m ->
                 if (sustain) {
-                    if (latched == m) { onKeyUp(); latched = null }
-                    else { onKeyDown(m); latched = m }
-                } else onKeyDown(m)
+                    if (latched == m) { onKeyUp(true); latched = null }
+                    else { onKeyDown(m, true); latched = m }
+                } else onKeyDown(m, false) // struck: rings and fades on its own
             },
-            onRelease = { if (!sustain) onKeyUp() }
+            onRelease = { if (!sustain) onKeyUp(false) } // damper
         )
 
         Spacer(Modifier.height(22.dp))
-        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, onToggleListen)
+        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, onToggleListen)
     }
 }
+
+/** Note label honouring the solfège toggle; Notes.solfege falls back to the name on black keys. */
+private fun label(m: Int, solfege: Boolean): String =
+    if (solfege) Notes.solfege(m) else Notes.name(m)
 
 @Composable
 private fun ToggleChip(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -189,7 +193,7 @@ private fun WhiteKey(
                 .align(Alignment.TopCenter))
         }
         Text(
-            if (solfege) Notes.solfege(m) else Notes.name(m),
+            label(m, solfege),
             color = Color(0xFF6B5FA0), fontSize = 9.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 6.dp)
         )
@@ -199,7 +203,7 @@ private fun WhiteKey(
 @Composable
 private fun MicPanel(
     detectedMidi: Int?, cents: Int, listening: Boolean,
-    loMidi: Int?, hiMidi: Int?, onToggleListen: () -> Unit,
+    loMidi: Int?, hiMidi: Int?, solfege: Boolean, onToggleListen: () -> Unit,
 ) {
     val inTune = detectedMidi != null && abs(cents) <= 12
     Column(
@@ -217,7 +221,7 @@ private fun MicPanel(
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth()) {
             Text(
-                detectedMidi?.let { Notes.name(it) } ?: "–",
+                detectedMidi?.let { label(it, solfege) } ?: "–",
                 color = if (inTune) Mint else TextC, fontSize = 48.sp, fontWeight = FontWeight.ExtraBold
             )
             Spacer(Modifier.width(12.dp))
@@ -237,8 +241,8 @@ private fun MicPanel(
 
         Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            RangeBox("Lowest sung", loMidi, Modifier.weight(1f))
-            RangeBox("Highest sung", hiMidi, Modifier.weight(1f))
+            RangeBox("Lowest sung", loMidi, solfege, Modifier.weight(1f))
+            RangeBox("Highest sung", hiMidi, solfege, Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(16.dp))
@@ -289,7 +293,7 @@ private fun TuningBar(detectedMidi: Int?, cents: Int, inTune: Boolean) {
 }
 
 @Composable
-private fun RangeBox(label: String, midi: Int?, modifier: Modifier = Modifier) {
+private fun RangeBox(label: String, midi: Int?, solfege: Boolean, modifier: Modifier = Modifier) {
     Column(
         modifier
             .clip(RoundedCornerShape(10.dp))
@@ -299,6 +303,7 @@ private fun RangeBox(label: String, midi: Int?, modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(label.uppercase(), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
-        Text(midi?.let { Notes.name(it) } ?: "–", color = TextC, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+        // `label` is shadowed by the String param here, so spell the choice out
+        Text(midi?.let { if (solfege) Notes.solfege(it) else Notes.name(it) } ?: "–", color = TextC, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
     }
 }

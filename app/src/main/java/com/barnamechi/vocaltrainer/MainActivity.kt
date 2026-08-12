@@ -40,8 +40,11 @@ class MainActivity : ComponentActivity() {
                 listening = listening.value,
                 loMidi = loMidi.value,
                 hiMidi = hiMidi.value,
-                onKeyDown = { m -> tone.noteOn(Notes.midiToFreq(m)) },
-                onKeyUp = { tone.noteOff() },
+                onKeyDown = { m, sustain ->
+                    val f = Notes.midiToFreq(m)
+                    if (sustain) tone.noteOn(f) else tone.strike(f)
+                },
+                onKeyUp = { sustain -> if (sustain) tone.noteOff() else tone.damp() },
                 onToggleListen = { if (listening.value) stopListening() else requestMic() },
             )
         }

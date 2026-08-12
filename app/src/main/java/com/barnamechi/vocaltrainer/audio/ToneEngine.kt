@@ -4,29 +4,56 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import kotlin.math.PI
+import kotlin.math.exp
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
- * Streams a continuous sine tone. noteOn(freq) holds the note indefinitely
- * (this is the "play continuously" behaviour); noteOff() fades it out.
- * A smoothed amplitude envelope avoids clicks on start/stop and note changes.
+ * Small polyphonic synth with a piano-like timbre (additive: fundamental + 6 harmonics at exact
+ * integer multiples, so tuning stays perfect equal temperament).
+ *
+ * strike(freq) = struck note: short attack, then natural exponential decay (sustain OFF).
+ * damp()       = gentle damper release on struck notes (finger lifted).
+ * noteOn(freq) = held, non-decaying note (sustain ON latch); noteOff() releases it.
  */
 class ToneEngine {
-    private val sampleRate = 44100
+    private companion object {
+        const val REQUESTED_RATE = 44100
+        const val VOICES = 4
+        const val PARTIALS = 7
+        val HARMONIC_AMP = doubleArrayOf(1.0, 0.5, 0.33, 0.22, 0.15, 0.10, 0.07)
+        val HARMONIC_SUM = HARMONIC_AMP.sum()
+        const val PEAK = 0.25       // per-voice peak, same loudness as the old sine
+        const val ATTACK_SEC = 0.005
+        const val RELEASE_SEC = 0.12
+        const val MINUS_60_DB = 6.908 // ln(1000)
+        const val DEAD = 1e-4
+    }
+
     private var track: AudioTrack? = null
     private var thread: Thread? = null
-
     @Volatile private var running = false
-    @Volatile private var targetFreq = 440.0
-    @Volatile private var targetAmp = 0.0
 
-    private var phase = 0.0
-    private var amp = 0.0
+    /** One struck/held note. Mutated on the audio thread; started/released from the UI thread. */
+    private class Voice {
+        @Volatile var active = false
+        @Volatile var held = false          // true = sustain latch, no decay
+        @Volatile var releasing = false
+        var freq = 440.0
+        val phase = DoubleArray(PARTIALS)
+        var env = 0.0
+        var attackStep = 0.0                // >0 while attacking
+        var decayCoef = 1.0
+        var releaseCoef = 1.0
+    }
+
+    private val voices = Array(VOICES) { Voice() }
+    private val lock = Any()
 
     fun start() {
         if (running) return
         val minBuf = AudioTrack.getMinBufferSize(
-            sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+            REQUESTED_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
         val t = AudioTrack.Builder()
             .setAudioAttributes(
@@ -37,7 +64,7 @@ class ToneEngine {
             )
             .setAudioFormat(
                 AudioFormat.Builder()
-                    .setSampleRate(sampleRate)
+                    .setSampleRate(REQUESTED_RATE)
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
@@ -49,17 +76,40 @@ class ToneEngine {
         t.play()
         running = true
 
+        // The track may not have opened at the requested rate; pitch must follow the ACTUAL rate.
+        val sr = t.sampleRate.takeIf { it > 0 } ?: REQUESTED_RATE
+
         thread = Thread {
             val buf = ShortArray(512)
+            val nyquist = sr / 2.0
             while (running) {
-                val inc = 2 * PI * targetFreq / sampleRate
-                val ta = targetAmp
                 for (i in buf.indices) {
-                    amp += (ta - amp) * 0.0006 // ~40 ms smoothing
-                    val s = sin(phase) * amp * 0.9
-                    buf[i] = (s * Short.MAX_VALUE).toInt().toShort()
-                    phase += inc
-                    if (phase > 2 * PI) phase -= 2 * PI
+                    var mix = 0.0
+                    for (v in voices) {
+                        if (!v.active) continue
+                        // envelope
+                        if (v.attackStep > 0.0) {
+                            v.env += v.attackStep
+                            if (v.env >= 1.0) { v.env = 1.0; v.attackStep = 0.0 }
+                        } else if (v.releasing) {
+                            v.env *= v.releaseCoef
+                        } else if (!v.held) {
+                            v.env *= v.decayCoef
+                        }
+                        if (v.env < DEAD && v.attackStep == 0.0) { v.active = false; v.env = 0.0; continue }
+                        // additive timbre: exact integer harmonics
+                        var s = 0.0
+                        for (h in 0 until PARTIALS) {
+                            val f = v.freq * (h + 1)
+                            if (f >= nyquist) break
+                            s += sin(v.phase[h]) * HARMONIC_AMP[h]
+                            v.phase[h] += 2 * PI * f / sr
+                            if (v.phase[h] > 2 * PI) v.phase[h] -= 2 * PI
+                        }
+                        mix += s / HARMONIC_SUM * v.env * PEAK
+                    }
+                    if (mix > 1.0) mix = 1.0 else if (mix < -1.0) mix = -1.0
+                    buf[i] = (mix * Short.MAX_VALUE).toInt().toShort()
                 }
                 t.write(buf, 0, buf.size)
             }
@@ -69,8 +119,47 @@ class ToneEngine {
         }
     }
 
-    fun noteOn(freq: Double) { targetFreq = freq; targetAmp = 0.25 }
-    fun noteOff() { targetAmp = 0.0 }
+    /** Struck note: attack then natural decay. Higher notes decay a little faster. */
+    fun strike(freq: Double) = allocate(freq, held = false)
+
+    /** Held note that does not decay until [noteOff]. */
+    fun noteOn(freq: Double) = allocate(freq, held = true)
+
+    /** Damper on struck notes. */
+    fun damp() = release(heldVoices = false)
+
+    /** Release held (sustain) notes. */
+    fun noteOff() = release(heldVoices = true)
+
+    private fun allocate(freq: Double, held: Boolean) {
+        val sr = (track?.sampleRate?.takeIf { it > 0 } ?: REQUESTED_RATE).toDouble()
+        // -60 dB in decaySec; a high note rings shorter than a low one, like a piano.
+        val decaySec = (2.5 * (440.0 / freq).pow(0.35)).coerceIn(0.4, 4.0)
+        synchronized(lock) {
+            val v = voices.firstOrNull { !it.active } ?: voices.minByOrNull { it.env } ?: voices[0]
+            v.active = false            // pause the render loop's use of it while we re-arm
+            v.freq = freq
+            for (h in v.phase.indices) v.phase[h] = 0.0
+            v.env = 0.0
+            v.attackStep = 1.0 / (ATTACK_SEC * sr)
+            v.decayCoef = exp(-MINUS_60_DB / (decaySec * sr))
+            v.releaseCoef = exp(-MINUS_60_DB / (RELEASE_SEC * sr))
+            v.held = held
+            v.releasing = false
+            v.active = true
+        }
+    }
+
+    private fun release(heldVoices: Boolean) {
+        synchronized(lock) {
+            for (v in voices) {
+                if (v.active && v.held == heldVoices) {
+                    v.attackStep = 0.0
+                    v.releasing = true
+                }
+            }
+        }
+    }
 
     fun stop() {
         running = false
@@ -78,6 +167,6 @@ class ToneEngine {
         thread = null
         track?.let { runCatching { it.stop() }; it.release() }
         track = null
-        amp = 0.0
+        synchronized(lock) { for (v in voices) { v.active = false; v.env = 0.0 } }
     }
 }
