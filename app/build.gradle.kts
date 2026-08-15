@@ -4,21 +4,52 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+/**
+ * Build inputs that must never be committed: Gradle property first (`-PNAME=...`), then
+ * environment variable, then the default. Nothing here is ever hardcoded in the repo.
+ */
+val secret: (String, String) -> String = { name, default ->
+    (project.findProperty(name) as String?) ?: System.getenv(name) ?: default
+}
+
+val bazaarRsaKey = secret("BAZAAR_RSA_KEY", "")
+val bazaarSku = secret("BAZAAR_SKU", "betterpitch_premium")
+val keystorePath = secret("KEYSTORE_FILE", "")
+val hasKeystore = keystorePath.isNotBlank() && file(keystorePath).exists()
+
 android {
-    namespace = "com.barnamechi.vocaltrainer"
+    namespace = "com.barnamechi.betterpitch"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.barnamechi.vocaltrainer"
+        applicationId = "com.barnamechi.betterpitch"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        // Injected at build time; an empty key makes BillingManager fall back to SecurityCheck.Disable
+        // so debug/CI builds without the secret still run.
+        buildConfigField("String", "BAZAAR_RSA_KEY", "\"$bazaarRsaKey\"")
+        buildConfigField("String", "SUBSCRIPTION_SKU", "\"$bazaarSku\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            if (hasKeystore) {
+                storeFile = file(keystorePath)
+                storePassword = secret("KEYSTORE_PASSWORD", "")
+                keyAlias = secret("KEY_ALIAS", "")
+                keyPassword = secret("KEY_PASSWORD", "")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Without a keystore the release variant still builds, just unsigned.
+            if (hasKeystore) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -31,6 +62,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -41,4 +73,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Cafe Bazaar in-app billing. JitPack-only - see the jitpack repo in settings.gradle.kts.
+    implementation("com.github.cafebazaar.Poolakey:poolakey:2.2.0")
 }

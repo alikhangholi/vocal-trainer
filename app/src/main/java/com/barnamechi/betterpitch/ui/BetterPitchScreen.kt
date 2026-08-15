@@ -1,4 +1,4 @@
-package com.barnamechi.vocaltrainer.ui
+package com.barnamechi.betterpitch.ui
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -30,7 +30,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.barnamechi.vocaltrainer.music.Notes
+import com.barnamechi.betterpitch.billing.BillingStatus
+import com.barnamechi.betterpitch.music.Notes
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -50,8 +51,14 @@ private val keyPressSpring = spring<Float>(
 
 private val BPM_CHOICES = listOf(60, 72, 84, 96, 120)
 
+/**
+ * Locked keys keep their exact place in the C2-C6 layout and simply recede. Composited against
+ * [Ink] rather than drawn with alpha, so a dimmed key never lets its neighbour show through.
+ */
+private fun dim(c: Color): Color = lerp(Ink, c, 0.35f)
+
 @Composable
-fun VocalTrainerScreen(
+fun BetterPitchScreen(
     detectedMidi: Int?,
     cents: Int,
     listening: Boolean,
@@ -64,6 +71,9 @@ fun VocalTrainerScreen(
     bpm: Int,
     onToggleMetronome: () -> Unit,
     onBpmChange: (Int) -> Unit,
+    isPremium: Boolean,
+    billingStatus: BillingStatus,
+    onUnlock: () -> Unit,
 ) {
     var solfege by remember { mutableStateOf(false) }
     var sustain by remember { mutableStateOf(false) }
@@ -77,7 +87,7 @@ fun VocalTrainerScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 24.dp)
     ) {
-        Text("VOCAL TRAINER", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp)
+        Text("BETTERPITCH", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp)
         Text("Play any note, sing it back", color = TextC, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
         Spacer(Modifier.height(6.dp))
         Text(
@@ -101,6 +111,8 @@ fun VocalTrainerScreen(
             latched = latched,
             solfege = solfege,
             scroll = keyboardScroll,
+            isPremium = isPremium,
+            onLockedPress = onUnlock,
             onPress = { m ->
                 if (sustain) {
                     if (latched == m) { onKeyUp(true); latched = null }
@@ -122,8 +134,13 @@ fun VocalTrainerScreen(
         Spacer(Modifier.height(18.dp))
         MetronomeBar(metronomeOn, bpm, onToggleMetronome, onBpmChange)
 
+        if (!isPremium) {
+            Spacer(Modifier.height(18.dp))
+            UnlockPanel(billingStatus, onUnlock)
+        }
+
         Spacer(Modifier.height(18.dp))
-        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, onToggleListen)
+        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, isPremium, onToggleListen, onUnlock)
     }
 }
 
@@ -154,6 +171,8 @@ private fun Keyboard(
     latched: Int?,
     solfege: Boolean,
     scroll: ScrollState,
+    isPremium: Boolean,
+    onLockedPress: () -> Unit,
     onPress: (Int) -> Unit,
     onRelease: () -> Unit,
 ) {
@@ -179,7 +198,8 @@ private fun Keyboard(
             Row {
                 whites.forEach { m ->
                     val lit = detectedMidi == m || latched == m
-                    WhiteKey(m, whiteW, lit, solfege, onPress, onRelease)
+                    val locked = !isPremium && !Notes.isFree(m)
+                    WhiteKey(m, whiteW, lit, solfege, locked, onLockedPress, onPress, onRelease)
                 }
             }
             // black keys overlaid
@@ -187,6 +207,8 @@ private fun Keyboard(
                 val whitesBefore = whites.count { it < m }
                 val x = whiteW * whitesBefore - blackW / 2
                 val lit = detectedMidi == m || latched == m
+                // No black key is in the free set, so in the free tier every one of them is locked.
+                val locked = !isPremium
                 var pressed by remember(m) { mutableStateOf(false) }
                 val dip by animateFloatAsState(if (pressed) 1f else 0f, keyPressSpring, label = "blackDip")
                 val shape = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp)
@@ -201,17 +223,22 @@ private fun Keyboard(
                         .clip(shape)
                         .background(
                             when {
+                                locked -> dim(Color(0xFF241A3A))
                                 lit -> Mint
                                 else -> lerp(Color(0xFF241A3A), Color(0xFF4A3A75), dip)
                             }
                         )
-                        .border(1.dp, Color(0xFF0E0820), shape)
-                        .pointerInput(m) {
+                        .border(1.dp, if (locked) dim(Color(0xFF0E0820)) else Color(0xFF0E0820), shape)
+                        .pointerInput(m, locked) {
                             // fires on touch-down (no tap/drag disambiguation delay); left
                             // unconsumed so a drag can still scroll the keyboard, which cancels
                             // the gesture and releases the note
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
+                                if (locked) {
+                                    waitForUpOrCancellation()?.let { onLockedPress() }
+                                    return@awaitEachGesture
+                                }
                                 pressed = true
                                 onPress(m)
                                 waitForUpOrCancellation()
@@ -228,6 +255,7 @@ private fun Keyboard(
 @Composable
 private fun WhiteKey(
     m: Int, w: androidx.compose.ui.unit.Dp, lit: Boolean, solfege: Boolean,
+    locked: Boolean, onLockedPress: () -> Unit,
     onPress: (Int) -> Unit, onRelease: () -> Unit,
 ) {
     var pressed by remember(m) { mutableStateOf(false) }
@@ -241,13 +269,24 @@ private fun WhiteKey(
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
             }
             .clip(shape)
-            .background(if (lit) Mint else lerp(Color(0xFFF3EEFF), Color(0xFFC8BCEA), dip))
-            .border(1.dp, Color(0xFFB9ADDE), shape)
-            .pointerInput(m) {
+            .background(
+                when {
+                    locked -> dim(Color(0xFFF3EEFF))
+                    lit -> Mint
+                    else -> lerp(Color(0xFFF3EEFF), Color(0xFFC8BCEA), dip)
+                }
+            )
+            .border(1.dp, if (locked) dim(Color(0xFFB9ADDE)) else Color(0xFFB9ADDE), shape)
+            .pointerInput(m, locked) {
                 // fires on touch-down (no tap/drag disambiguation delay); left unconsumed so a
                 // drag can still scroll the keyboard, which cancels the gesture and releases
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
+                    if (locked) {
+                        // Only a completed tap opens the unlock card - a drag is still a scroll.
+                        waitForUpOrCancellation()?.let { onLockedPress() }
+                        return@awaitEachGesture
+                    }
                     pressed = true
                     onPress(m)
                     waitForUpOrCancellation()
@@ -263,7 +302,8 @@ private fun WhiteKey(
         }
         Text(
             label(m, solfege),
-            color = Color(0xFF6B5FA0), fontSize = 9.sp, fontWeight = FontWeight.Bold,
+            color = if (locked) dim(Color(0xFF6B5FA0)) else Color(0xFF6B5FA0),
+            fontSize = 9.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 6.dp)
         )
     }
@@ -399,10 +439,66 @@ private fun MetronomeBar(on: Boolean, bpm: Int, onToggle: () -> Unit, onBpmChang
     }
 }
 
+/**
+ * The single "Unlock betterPitch" surface. Shown only in the free tier, in the same card style as
+ * [MetronomeBar]. If Cafe Bazaar isn't installed there is nothing to launch, so the CTA says so
+ * instead of failing on tap.
+ */
+@Composable
+private fun UnlockPanel(status: BillingStatus, onUnlock: () -> Unit) {
+    val bazaarMissing = status == BillingStatus.BazaarMissing
+    // Tapping while the billing connection isn't up would do nothing, so the CTA says what it's
+    // actually doing: connecting, offering a retry, or ready to subscribe.
+    val cta = when {
+        bazaarMissing -> "Install Cafe Bazaar to subscribe"
+        status == BillingStatus.Connecting -> "Connecting to Cafe Bazaar…"
+        status == BillingStatus.Ready -> "Subscribe with Cafe Bazaar"
+        else -> "Retry connection"
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Surface)
+            .border(1.dp, Line, RoundedCornerShape(18.dp))
+            .padding(16.dp)
+    ) {
+        Text("Unlock betterPitch", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Free covers Do Re Mi Fa Sol La Si. Subscribe for the full C2–C6 keyboard and live " +
+                "mic detection of the note you're singing.",
+            color = Muted, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (bazaarMissing) Color(0xFF2C2250) else Honey)
+                .border(1.dp, if (bazaarMissing) Line else Honey, RoundedCornerShape(12.dp))
+                .clickable(enabled = !bazaarMissing) { onUnlock() }
+                .padding(vertical = 13.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                cta,
+                color = if (bazaarMissing) Muted else Color(0xFF241A05),
+                fontSize = 15.sp, fontWeight = FontWeight.Bold
+            )
+        }
+        if (status is BillingStatus.Error) {
+            Spacer(Modifier.height(8.dp))
+            Text(status.message, color = Coral, fontSize = 12.sp)
+        }
+    }
+}
+
 @Composable
 private fun MicPanel(
     detectedMidi: Int?, cents: Int, listening: Boolean,
-    loMidi: Int?, hiMidi: Int?, solfege: Boolean, onToggleListen: () -> Unit,
+    loMidi: Int?, hiMidi: Int?, solfege: Boolean, isPremium: Boolean,
+    onToggleListen: () -> Unit, onUnlock: () -> Unit,
 ) {
     val inTune = detectedMidi != null && abs(cents) <= 12
     Column(
@@ -414,7 +510,11 @@ private fun MicPanel(
             .padding(18.dp)
     ) {
         Text("Your voice", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text("Sing one steady note on \"aah\".", color = Muted, fontSize = 13.sp)
+        Text(
+            if (isPremium) "Sing one steady note on \"aah\"."
+            else "Live mic detection is part of betterPitch.",
+            color = Muted, fontSize = 13.sp
+        )
         Spacer(Modifier.height(14.dp))
 
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.Center,
@@ -450,12 +550,12 @@ private fun MicPanel(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (listening) Coral else Honey)
-                .clickable { onToggleListen() }
+                .clickable { if (isPremium) onToggleListen() else onUnlock() }
                 .padding(vertical = 13.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                if (listening) "Stop" else "Start listening",
+                if (!isPremium) "Unlock to use the mic" else if (listening) "Stop" else "Start listening",
                 color = if (listening) Color(0xFF2A0D08) else Color(0xFF241A05),
                 fontSize = 15.sp, fontWeight = FontWeight.Bold
             )

@@ -1,4 +1,4 @@
-package com.barnamechi.vocaltrainer.music
+package com.barnamechi.betterpitch.music
 
 import kotlin.math.log2
 import kotlin.math.pow
@@ -12,6 +12,11 @@ object Notes {
     const val LOW = 36   // C2
     const val HIGH = 84  // C6
     const val MIDDLE_C = 60 // C4
+
+    /** Free tier: the seven solfège notes of the C4 octave - Do Re Mi Fa Sol La Si. */
+    val FREE_MIDI = setOf(60, 62, 64, 65, 67, 69, 71)
+
+    fun isFree(m: Int): Boolean = m in FREE_MIDI
 
     fun midiToFreq(m: Int): Double = 440.0 * 2.0.pow((m - 69) / 12.0)
     fun freqToMidiFloat(f: Double): Double = 69.0 + 12.0 * log2(f / 440.0)

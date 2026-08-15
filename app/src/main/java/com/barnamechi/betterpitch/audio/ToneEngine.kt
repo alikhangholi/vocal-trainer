@@ -1,4 +1,4 @@
-package com.barnamechi.vocaltrainer.audio
+package com.barnamechi.betterpitch.audio
 
 import android.media.AudioAttributes
 import android.media.AudioFormat

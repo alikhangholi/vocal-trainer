@@ -1,16 +1,23 @@
-# Vocal Trainer — native Android
+# betterPitch — native Android
 
 Native Kotlin + Jetpack Compose. Plays reference notes (with a **Sustain** mode that
 holds a note continuously), and detects your sung pitch from the mic in real time —
 the key you sing lights up green, with a live tuning meter and a session range finder.
 
 ## What's here
-- `app/src/main/java/com/barnamechi/vocaltrainer/`
-  - `music/Notes.kt` — MIDI↔frequency, note names, solfège, cents
+- `app/src/main/java/com/barnamechi/betterpitch/`
+  - `music/Notes.kt` — MIDI↔frequency, note names, solfège, cents, free-tier note set
   - `audio/ToneEngine.kt` — continuous tone synthesis (AudioTrack); `noteOn`/`noteOff`
   - `audio/PitchEngine.kt` — mic capture + autocorrelation pitch detection (AudioRecord)
+  - `billing/BillingManager.kt` — Cafe Bazaar subscription (Poolakey); `isPremium: StateFlow`
   - `MainActivity.kt` — RECORD_AUDIO permission, engine ownership, state
-  - `ui/VocalTrainerScreen.kt` — keyboard, sustain/solfège toggles, mic panel
+  - `ui/BetterPitchScreen.kt` — keyboard, sustain/solfège toggles, unlock + mic panels
+
+## Free tier vs. subscription
+Free covers the seven solfège notes of the C4 octave (`Notes.FREE_MIDI`). The full C2–C6
+keyboard and live mic detection require the `betterpitch_premium` subscription, bought
+through Cafe Bazaar. Verification is client-side only (no backend) — Poolakey checks
+Bazaar's signature against `BuildConfig.BAZAAR_RSA_KEY`, injected at build time.
 
 ## Build (on your machine — SDK required)
 This project has no Gradle wrapper binary committed. Generate it once, then build:
@@ -23,6 +30,17 @@ gradle wrapper --gradle-version 8.9      # or: open the folder in Android Studio
 ```
 
 Enable USB debugging on the phone, or use `adb install app-debug.apk`.
+
+For a signed release, supply the keystore and the Bazaar key as Gradle properties or
+environment variables — never in the repo:
+
+```bash
+KEYSTORE_FILE=/abs/path/betterpitch-release.jks KEYSTORE_PASSWORD=... \
+KEY_ALIAS=betterpitch KEY_PASSWORD=... BAZAAR_RSA_KEY=... \
+  ./gradlew assembleRelease
+```
+
+Without `KEYSTORE_FILE` the release variant still builds, just unsigned.
 
 ## Notes / knobs
 - Range is C2–C6 — change `LOW`/`HIGH` in `Notes.kt`.

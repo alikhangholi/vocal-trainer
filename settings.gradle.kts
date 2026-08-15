@@ -33,11 +33,14 @@ dependencyResolutionManagement {
         maven { url = uri("https://maven.myket.ir") }
         maven { url = uri("https://en-mirror.ir") }
         maven { url = uri("https://mirror.kargadan.ir/repository/maven-central-group/") }
+        // Poolakey (Cafe Bazaar billing) ships only via JitPack, which none of the mirrors above
+        // carry - so it sits after them, where it can't affect resolution of anything else.
+        maven { url = uri("https://jitpack.io") }
         if (!isCi) {
             google()
             mavenCentral()
         }
     }
 }
-rootProject.name = "VocalTrainer"
+rootProject.name = "betterPitch"
 include(":app")

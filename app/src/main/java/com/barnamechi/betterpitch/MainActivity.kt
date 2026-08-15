@@ -1,4 +1,4 @@
-package com.barnamechi.vocaltrainer
+package com.barnamechi.betterpitch
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -6,17 +6,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
-import com.barnamechi.vocaltrainer.audio.Metronome
-import com.barnamechi.vocaltrainer.audio.PitchEngine
-import com.barnamechi.vocaltrainer.audio.ToneEngine
-import com.barnamechi.vocaltrainer.music.Notes
-import com.barnamechi.vocaltrainer.ui.VocalTrainerScreen
+import com.barnamechi.betterpitch.audio.Metronome
+import com.barnamechi.betterpitch.audio.PitchEngine
+import com.barnamechi.betterpitch.audio.ToneEngine
+import com.barnamechi.betterpitch.billing.BillingManager
+import com.barnamechi.betterpitch.music.Notes
+import com.barnamechi.betterpitch.ui.BetterPitchScreen
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var tone: ToneEngine
+    private lateinit var billing: BillingManager
     private val metronome = Metronome()
     private var pitch: PitchEngine? = null
 
@@ -36,9 +40,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tone = ToneEngine().also { it.start() }
+        billing = BillingManager(this).also { it.connect() }
 
         setContent {
-            VocalTrainerScreen(
+            val isPremium by billing.isPremium.collectAsState()
+            val billingStatus by billing.status.collectAsState()
+
+            BetterPitchScreen(
                 detectedMidi = detectedMidi.value,
                 cents = cents.value,
                 listening = listening.value,
@@ -60,11 +68,17 @@ class MainActivity : ComponentActivity() {
                     bpm.value = v
                     metronome.setBpm(v)
                 },
+                isPremium = isPremium,
+                billingStatus = billingStatus,
+                onUnlock = { billing.subscribe() },
             )
         }
     }
 
     private fun requestMic() {
+        // Gate at the source as well as in the UI: a free user never reaches the permission
+        // dialog, let alone PitchEngine.
+        if (!billing.isPremium.value) return
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) startListening() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
@@ -99,10 +113,18 @@ class MainActivity : ComponentActivity() {
         detectedMidi.value = null
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Re-check on every foreground: a subscription bought or cancelled outside the app
+        // (in Bazaar itself) shows up here without a restart.
+        if (billing.isReady()) billing.queryPurchasedSubscriptions()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         pitch?.stop()
         tone.stop()
         metronome.stop()
+        billing.disconnect()
     }
 }

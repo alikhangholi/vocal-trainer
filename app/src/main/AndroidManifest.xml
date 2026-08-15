@@ -2,12 +2,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="com.farsitel.bazaar.permission.PAY_THROUGH_BAZAAR" />
+
+    <!--
+      Required on Android 11+: without it, package visibility hides Bazaar and Poolakey's service
+      bind fails silently even when Bazaar is installed.
+    -->
+    <queries>
+        <package android:name="com.farsitel.bazaar" />
+    </queries>
 
     <application
         android:allowBackup="true"
-        android:label="Vocal Trainer"
+        android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.VocalTrainer">
+        android:theme="@style/Theme.BetterPitch">
         <activity
             android:name=".MainActivity"
             android:exported="true"

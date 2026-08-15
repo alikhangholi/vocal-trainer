@@ -1,4 +1,4 @@
-package com.barnamechi.vocaltrainer.audio
+package com.barnamechi.betterpitch.audio
 
 import android.annotation.SuppressLint
 import android.media.AudioFormat
@@ -6,7 +6,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
-import com.barnamechi.vocaltrainer.music.Notes
+import com.barnamechi.betterpitch.music.Notes
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
