@@ -1,8 +1,6 @@
 package com.barnamechi.betterpitch.ui
 
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -35,27 +32,7 @@ import com.barnamechi.betterpitch.music.Notes
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val Ink = Color(0xFF181328)
-private val Surface = Color(0xFF221A3A)
-private val Line = Color(0xFF3A2F60)
-private val Honey = Color(0xFFE8B04B)
-private val Mint = Color(0xFF57D9A3)
-private val Coral = Color(0xFFEF7D68)
-private val TextC = Color(0xFFEFEAFF)
-private val Muted = Color(0xFFA99FCF)
-
-/** Snappy, slightly bouncy key-press feedback. */
-private val keyPressSpring = spring<Float>(
-    dampingRatio = 0.6f, stiffness = Spring.StiffnessHigh
-)
-
-private val BPM_CHOICES = listOf(60, 72, 84, 96, 120)
-
-/**
- * Locked keys keep their exact place in the C2-C6 layout and simply recede. Composited against
- * [Ink] rather than drawn with alpha, so a dimmed key never lets its neighbour show through.
- */
-private fun dim(c: Color): Color = lerp(Ink, c, 0.35f)
+// Palette, chip rows, card chrome and `label` live in Theme.kt - same package, no import needed.
 
 @Composable
 fun BetterPitchScreen(
@@ -74,8 +51,10 @@ fun BetterPitchScreen(
     isPremium: Boolean,
     billingStatus: BillingStatus,
     onUnlock: () -> Unit,
+    solfege: Boolean,
+    onSolfegeChange: (Boolean) -> Unit,
+    onOpenSightReading: () -> Unit,
 ) {
-    var solfege by remember { mutableStateOf(false) }
     var sustain by remember { mutableStateOf(false) }
     var latched by remember { mutableStateOf<Int?>(null) }
     val keyboardScroll = rememberScrollState()
@@ -97,7 +76,7 @@ fun BetterPitchScreen(
 
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ToggleChip("Solfège (Do Re Mi)", solfege) { solfege = it }
+            ToggleChip("Solfège (Do Re Mi)", solfege, onSolfegeChange)
             Spacer(Modifier.width(16.dp))
             ToggleChip("Sustain (hold note)", sustain) {
                 sustain = it
@@ -134,6 +113,9 @@ fun BetterPitchScreen(
         Spacer(Modifier.height(18.dp))
         MetronomeBar(metronomeOn, bpm, onToggleMetronome, onBpmChange)
 
+        Spacer(Modifier.height(18.dp))
+        SightReadingCard(onOpenSightReading)
+
         if (!isPremium) {
             Spacer(Modifier.height(18.dp))
             UnlockPanel(billingStatus, onUnlock)
@@ -144,9 +126,31 @@ fun BetterPitchScreen(
     }
 }
 
-/** Note label honouring the solfège toggle; Notes.solfege falls back to the name on black keys. */
-private fun label(m: Int, solfege: Boolean): String =
-    if (solfege) Notes.solfege(m) else Notes.name(m)
+/** Entry point for the sight-reading game, which takes over the whole screen. */
+@Composable
+private fun SightReadingCard(onOpen: () -> Unit) {
+    Column(Modifier.card()) {
+        Text("Read the notes", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "100 random notes scroll across a treble staff in time with the metronome. Name each " +
+                "one before it reaches the line.",
+            color = Muted, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Honey)
+                .clickable { onOpen() }
+                .padding(vertical = 13.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Open sight-reading", color = OnHoney, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
 
 @Composable
 private fun ToggleChip(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
@@ -387,14 +391,7 @@ private fun BoxScope.Marker(x: androidx.compose.ui.unit.Dp, color: Color) {
 /** Metronome: on/off plus a few standard tempos. */
 @Composable
 private fun MetronomeBar(on: Boolean, bpm: Int, onToggle: () -> Unit, onBpmChange: (Int) -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Surface)
-            .border(1.dp, Line, RoundedCornerShape(18.dp))
-            .padding(16.dp)
-    ) {
+    Column(Modifier.card()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Metronome", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -409,33 +406,13 @@ private fun MetronomeBar(on: Boolean, bpm: Int, onToggle: () -> Unit, onBpmChang
             ) {
                 Text(
                     if (on) "Stop" else "Start",
-                    color = if (on) Color(0xFF2A0D08) else Color(0xFF241A05),
+                    color = if (on) OnCoral else OnHoney,
                     fontSize = 14.sp, fontWeight = FontWeight.Bold
                 )
             }
         }
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BPM_CHOICES.forEach { choice ->
-                val selected = choice == bpm
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) Honey else Color(0xFF2C2250))
-                        .border(1.dp, if (selected) Honey else Line, RoundedCornerShape(10.dp))
-                        .clickable { onBpmChange(choice) }
-                        .padding(vertical = 9.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "$choice",
-                        color = if (selected) Color(0xFF241A05) else Muted,
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
+        ChipRow(BPM_CHOICES, bpm, label = { "$it" }, onSelect = onBpmChange)
     }
 }
 
