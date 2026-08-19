@@ -16,6 +16,8 @@ import com.barnamechi.betterpitch.audio.ToneEngine
 import com.barnamechi.betterpitch.billing.BillingManager
 import com.barnamechi.betterpitch.music.Notes
 import com.barnamechi.betterpitch.ui.BetterPitchScreen
+import com.barnamechi.betterpitch.ui.Route
+import com.barnamechi.betterpitch.ui.SightReadingScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -31,6 +33,8 @@ class MainActivity : ComponentActivity() {
     private val hiMidi = mutableStateOf<Int?>(null)
     private val metronomeOn = mutableStateOf(false)
     private val bpm = mutableStateOf(60)
+    private val solfege = mutableStateOf(false)
+    private val route = mutableStateOf(Route.Home)
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -46,33 +50,55 @@ class MainActivity : ComponentActivity() {
             val isPremium by billing.isPremium.collectAsState()
             val billingStatus by billing.status.collectAsState()
 
-            BetterPitchScreen(
-                detectedMidi = detectedMidi.value,
-                cents = cents.value,
-                listening = listening.value,
-                loMidi = loMidi.value,
-                hiMidi = hiMidi.value,
-                onKeyDown = { m, sustain ->
-                    val f = Notes.midiToFreq(m)
-                    if (sustain) tone.noteOn(f) else tone.strike(f)
-                },
-                onKeyUp = { sustain -> if (sustain) tone.noteOff() else tone.damp() },
-                onToggleListen = { if (listening.value) stopListening() else requestMic() },
-                metronomeOn = metronomeOn.value,
-                bpm = bpm.value,
-                onToggleMetronome = {
-                    if (metronomeOn.value) { metronome.stop(); metronomeOn.value = false }
-                    else { metronome.start(bpm.value); metronomeOn.value = true }
-                },
-                onBpmChange = { v ->
-                    bpm.value = v
-                    metronome.setBpm(v)
-                },
-                isPremium = isPremium,
-                billingStatus = billingStatus,
-                onUnlock = { billing.subscribe() },
-            )
+            when (route.value) {
+                Route.Home -> BetterPitchScreen(
+                    detectedMidi = detectedMidi.value,
+                    cents = cents.value,
+                    listening = listening.value,
+                    loMidi = loMidi.value,
+                    hiMidi = hiMidi.value,
+                    onKeyDown = { m, sustain ->
+                        val f = Notes.midiToFreq(m)
+                        if (sustain) tone.noteOn(f) else tone.strike(f)
+                    },
+                    onKeyUp = { sustain -> if (sustain) tone.noteOff() else tone.damp() },
+                    onToggleListen = { if (listening.value) stopListening() else requestMic() },
+                    metronomeOn = metronomeOn.value,
+                    bpm = bpm.value,
+                    onToggleMetronome = { toggleMetronome() },
+                    onBpmChange = { v -> setBpm(v) },
+                    isPremium = isPremium,
+                    billingStatus = billingStatus,
+                    onUnlock = { billing.subscribe() },
+                    solfege = solfege.value,
+                    onSolfegeChange = { solfege.value = it },
+                    onOpenSightReading = { route.value = Route.SightReading },
+                )
+
+                Route.SightReading -> SightReadingScreen(
+                    solfege = solfege.value,
+                    onSolfegeChange = { solfege.value = it },
+                    bpm = bpm.value,
+                    onBpmChange = { v -> setBpm(v) },
+                    metronomeOn = metronomeOn.value,
+                    beatsPerBar = metronome.beatsPerBar,
+                    onStartMetronome = { if (!metronomeOn.value) toggleMetronome() },
+                    onStopMetronome = { if (metronomeOn.value) toggleMetronome() },
+                    beatNow = { metronome.audibleBeat() },
+                    onBack = { route.value = Route.Home },
+                )
+            }
         }
+    }
+
+    private fun toggleMetronome() {
+        if (metronomeOn.value) { metronome.stop(); metronomeOn.value = false }
+        else { metronome.start(bpm.value); metronomeOn.value = true }
+    }
+
+    private fun setBpm(v: Int) {
+        bpm.value = v
+        metronome.setBpm(v)
     }
 
     private fun requestMic() {
@@ -111,6 +137,17 @@ class MainActivity : ComponentActivity() {
         pitch?.stop(); pitch = null
         listening.value = false
         detectedMidi.value = null
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // The sight-reading frame loop freezes when the window goes away, but the click track
+        // wouldn't - coming back would score every note that elapsed as a miss. Stopping the
+        // metronome pauses the round instead. Home keeps its click running, as it always has.
+        if (route.value == Route.SightReading && metronomeOn.value) {
+            metronome.stop()
+            metronomeOn.value = false
+        }
     }
 
     override fun onStart() {
