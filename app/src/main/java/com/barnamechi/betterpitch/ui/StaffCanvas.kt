@@ -57,7 +57,7 @@ internal fun StaffCanvas(
         val now = nowBeat.floatValue // the one per-frame state read
         val gap = size.height / 9f      // one staff line gap; 5 lines + ledgers + stems all fit
         val centerY = size.height / 2f
-        fun y(step: Int) = centerY - (step - Staff.MIDDLE_LINE_STEP) * (gap / 2f)
+        fun y(step: Int) = stepY(step, centerY, gap)
 
         val clefW = gap * 3.2f
         val judgeX = size.width * 0.78f
@@ -91,7 +91,7 @@ internal fun StaffCanvas(
             strokeWidth = 2.dp.toPx()
         )
 
-        drawClef(measurer, gap, ::y)
+        drawClef(measurer, centerY, gap)
 
         // --- notes -------------------------------------------------------------------------
         // Beats are uniform (beat(i) = i * beatsPerNote), so the visible window is arithmetic:
@@ -119,7 +119,7 @@ internal fun StaffCanvas(
             else (1f - (now - judgedAt[i]) / 0.4f).coerceIn(0f, 1f)
             val scale = 1f + 0.35f * flash
 
-            ledgerLines(step, cx, gap, lineW, ::y)
+            ledgerLines(step, cx, centerY, gap, lineW)
             drawNote(cx, cy, headRx * scale, gap, step, beatsPerNote, color)
         }
     }
@@ -145,20 +145,26 @@ private fun DrawScope.drawNote(
     }
 }
 
+/** Half a line gap per step, measured out from the middle line (B4). */
+private fun stepY(step: Int, centerY: Float, gap: Float): Float =
+    centerY - (step - Staff.MIDDLE_LINE_STEP) * (gap / 2f)
+
 private fun DrawScope.ledgerLines(
-    noteStep: Int, cx: Float, gap: Float, lineW: Float, y: (Int) -> Float,
+    noteStep: Int, cx: Float, centerY: Float, gap: Float, lineW: Float,
 ) {
     val half = gap * 0.95f
     val below = Staff.BOTTOM_LINE_STEP - 2
     val above = Staff.TOP_LINE_STEP + 2
     if (noteStep <= below) {
         for (ls in below downTo noteStep step 2) {
-            drawLine(Line, Offset(cx - half, y(ls)), Offset(cx + half, y(ls)), strokeWidth = lineW)
+            val ly = stepY(ls, centerY, gap)
+            drawLine(Line, Offset(cx - half, ly), Offset(cx + half, ly), strokeWidth = lineW)
         }
     }
     if (noteStep >= above) {
         for (ls in above..noteStep step 2) {
-            drawLine(Line, Offset(cx - half, y(ls)), Offset(cx + half, y(ls)), strokeWidth = lineW)
+            val ly = stepY(ls, centerY, gap)
+            drawLine(Line, Offset(cx - half, ly), Offset(cx + half, ly), strokeWidth = lineW)
         }
     }
 }
@@ -171,18 +177,23 @@ private fun DrawScope.ledgerLines(
  * don't ship, and it would render as a tofu box with no way to detect that at runtime. Bundling a
  * music font for one glyph isn't worth it. Swap this function for a real Path any time.
  */
-private fun DrawScope.drawClef(measurer: TextMeasurer, gap: Float, y: (Int) -> Float) {
+private fun DrawScope.drawClef(measurer: TextMeasurer, centerY: Float, gap: Float) {
     val x = gap * 1.1f
+    val gy = stepY(Staff.G_LINE_STEP, centerY, gap)
     drawLine(
         Honey,
-        Offset(x, y(Staff.TOP_LINE_STEP) - gap * 0.6f),
-        Offset(x, y(Staff.BOTTOM_LINE_STEP) + gap * 0.6f),
+        Offset(x, stepY(Staff.TOP_LINE_STEP, centerY, gap) - gap * 0.6f),
+        Offset(x, stepY(Staff.BOTTOM_LINE_STEP, centerY, gap) + gap * 0.6f),
         strokeWidth = gap * 0.28f
     )
-    drawCircle(Honey, radius = gap * 0.34f, center = Offset(x, y(Staff.G_LINE_STEP)))
+    drawCircle(Honey, radius = gap * 0.34f, center = Offset(x, gy))
     val laid = measurer.measure(
         "G",
-        style = TextStyle(color = Honey, fontSize = (gap * 0.62f).toSp(), fontWeight = FontWeight.ExtraBold)
+        style = TextStyle(
+            color = Honey,
+            fontSize = (gap * 0.62f).toSp(),
+            fontWeight = FontWeight.ExtraBold
+        )
     )
-    drawText(laid, topLeft = Offset(x + gap * 0.5f, y(Staff.G_LINE_STEP) - laid.size.height / 2f))
+    drawText(laid, topLeft = Offset(x + gap * 0.5f, gy - laid.size.height / 2f))
 }
