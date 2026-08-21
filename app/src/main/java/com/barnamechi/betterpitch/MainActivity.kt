@@ -6,14 +6,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import com.barnamechi.betterpitch.audio.Metronome
 import com.barnamechi.betterpitch.audio.PitchEngine
 import com.barnamechi.betterpitch.audio.ToneEngine
-import com.barnamechi.betterpitch.billing.BillingManager
 import com.barnamechi.betterpitch.music.Notes
 import com.barnamechi.betterpitch.ui.BetterPitchScreen
 import com.barnamechi.betterpitch.ui.Route
@@ -22,7 +19,6 @@ import com.barnamechi.betterpitch.ui.SightReadingScreen
 class MainActivity : ComponentActivity() {
 
     private lateinit var tone: ToneEngine
-    private lateinit var billing: BillingManager
     private val metronome = Metronome()
     private var pitch: PitchEngine? = null
 
@@ -44,12 +40,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tone = ToneEngine().also { it.start() }
-        billing = BillingManager(this).also { it.connect() }
 
         setContent {
-            val isPremium by billing.isPremium.collectAsState()
-            val billingStatus by billing.status.collectAsState()
-
             when (route.value) {
                 Route.Home -> BetterPitchScreen(
                     detectedMidi = detectedMidi.value,
@@ -67,9 +59,6 @@ class MainActivity : ComponentActivity() {
                     bpm = bpm.value,
                     onToggleMetronome = { toggleMetronome() },
                     onBpmChange = { v -> setBpm(v) },
-                    isPremium = isPremium,
-                    billingStatus = billingStatus,
-                    onUnlock = { billing.subscribe() },
                     solfege = solfege.value,
                     onSolfegeChange = { solfege.value = it },
                     onOpenSightReading = { route.value = Route.SightReading },
@@ -102,9 +91,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestMic() {
-        // Gate at the source as well as in the UI: a free user never reaches the permission
-        // dialog, let alone PitchEngine.
-        if (!billing.isPremium.value) return
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         if (granted) startListening() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
@@ -150,18 +136,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        // Re-check on every foreground: a subscription bought or cancelled outside the app
-        // (in Bazaar itself) shows up here without a restart.
-        if (billing.isReady()) billing.queryPurchasedSubscriptions()
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         pitch?.stop()
         tone.stop()
         metronome.stop()
-        billing.disconnect()
     }
 }

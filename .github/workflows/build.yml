@@ -34,8 +34,6 @@ jobs:
               | while IFS= read -r line; do echo "::error::$line"; done
           fi
           exit $code
-        env:
-          BAZAAR_RSA_KEY: ${{ secrets.BAZAAR_RSA_KEY }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -67,7 +65,6 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          BAZAAR_RSA_KEY: ${{ secrets.BAZAAR_RSA_KEY }}
 
       - name: Upload release APK
         if: steps.keystore.outputs.path != ''

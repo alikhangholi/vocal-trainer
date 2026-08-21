@@ -2,15 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="com.farsitel.bazaar.permission.PAY_THROUGH_BAZAAR" />
-
-    <!--
-      Required on Android 11+: without it, package visibility hides Bazaar and Poolakey's service
-      bind fails silently even when Bazaar is installed.
-    -->
-    <queries>
-        <package android:name="com.farsitel.bazaar" />
-    </queries>
 
     <application
         android:allowBackup="true"

@@ -57,7 +57,7 @@ internal val CardShape = RoundedCornerShape(18.dp)
 internal val ChipShape = RoundedCornerShape(10.dp)
 
 /**
- * Locked keys keep their exact place in the C2-C6 layout and simply recede. Composited against
+ * A disabled control keeps its exact place in the layout and simply recedes. Composited against
  * [Ink] rather than drawn with alpha, so a dimmed key never lets its neighbour show through.
  */
 internal fun dim(c: Color): Color = lerp(Ink, c, 0.35f)
