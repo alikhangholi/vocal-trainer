@@ -6,18 +6,16 @@ the key you sing lights up green, with a live tuning meter and a session range f
 
 ## What's here
 - `app/src/main/java/com/barnamechi/betterpitch/`
-  - `music/Notes.kt` — MIDI↔frequency, note names, solfège, cents, free-tier note set
+  - `music/Notes.kt` — MIDI↔frequency, note names, solfège, cents
+  - `music/Staff.kt` — treble-staff geometry for the sight-reading game
   - `audio/ToneEngine.kt` — continuous tone synthesis (AudioTrack); `noteOn`/`noteOff`
   - `audio/PitchEngine.kt` — mic capture + autocorrelation pitch detection (AudioRecord)
-  - `billing/BillingManager.kt` — Cafe Bazaar subscription (Poolakey); `isPremium: StateFlow`
+  - `audio/Metronome.kt` — the click track and the beat clock the game reads
   - `MainActivity.kt` — RECORD_AUDIO permission, engine ownership, state
-  - `ui/BetterPitchScreen.kt` — keyboard, sustain/solfège toggles, unlock + mic panels
+  - `ui/BetterPitchScreen.kt` — keyboard, sustain/solfège toggles, metronome + mic panels
+  - `ui/SightReadingScreen.kt` + `ui/StaffCanvas.kt` — the note-reading game
 
-## Free tier vs. subscription
-Free covers the seven solfège notes of the C4 octave (`Notes.FREE_MIDI`). The full C2–C6
-keyboard and live mic detection require the `betterpitch_premium` subscription, bought
-through Cafe Bazaar. Verification is client-side only (no backend) — Poolakey checks
-Bazaar's signature against `BuildConfig.BAZAAR_RSA_KEY`, injected at build time.
+Every feature is free — there is no paywall, no billing SDK and no account.
 
 ## Build (on your machine — SDK required)
 This project has no Gradle wrapper binary committed. Generate it once, then build:
@@ -31,12 +29,12 @@ gradle wrapper --gradle-version 8.9      # or: open the folder in Android Studio
 
 Enable USB debugging on the phone, or use `adb install app-debug.apk`.
 
-For a signed release, supply the keystore and the Bazaar key as Gradle properties or
-environment variables — never in the repo:
+For a signed release, supply the keystore as Gradle properties or environment
+variables — never in the repo:
 
 ```bash
 KEYSTORE_FILE=/abs/path/betterpitch-release.jks KEYSTORE_PASSWORD=... \
-KEY_ALIAS=betterpitch KEY_PASSWORD=... BAZAAR_RSA_KEY=... \
+KEY_ALIAS=betterpitch KEY_PASSWORD=... \
   ./gradlew assembleRelease
 ```
 

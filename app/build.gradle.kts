@@ -12,8 +12,6 @@ val secret: (String, String) -> String = { name, default ->
     (project.findProperty(name) as String?) ?: System.getenv(name) ?: default
 }
 
-val bazaarRsaKey = secret("BAZAAR_RSA_KEY", "")
-val bazaarSku = secret("BAZAAR_SKU", "betterpitch_premium")
 val keystorePath = secret("KEYSTORE_FILE", "")
 val hasKeystore = keystorePath.isNotBlank() && file(keystorePath).exists()
 
@@ -27,11 +25,6 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        // Injected at build time; an empty key makes BillingManager fall back to SecurityCheck.Disable
-        // so debug/CI builds without the secret still run.
-        buildConfigField("String", "BAZAAR_RSA_KEY", "\"$bazaarRsaKey\"")
-        buildConfigField("String", "SUBSCRIPTION_SKU", "\"$bazaarSku\"")
     }
 
     signingConfigs {
@@ -62,7 +55,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 }
 
@@ -74,6 +66,4 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    // Cafe Bazaar in-app billing. JitPack-only - see the jitpack repo in settings.gradle.kts.
-    implementation("com.github.cafebazaar.Poolakey:poolakey:2.2.0")
 }
