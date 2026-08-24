@@ -51,6 +51,7 @@ fun BetterPitchScreen(
     solfege: Boolean,
     onSolfegeChange: (Boolean) -> Unit,
     onOpenSightReading: () -> Unit,
+    onOpenRhythmGame: () -> Unit,
 ) {
     var sustain by remember { mutableStateOf(false) }
     var latched by remember { mutableStateOf<Int?>(null) }
@@ -106,13 +107,16 @@ fun BetterPitchScreen(
         )
 
         Spacer(Modifier.height(18.dp))
+        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, onToggleListen)
+
+        Spacer(Modifier.height(18.dp))
         MetronomeBar(metronomeOn, bpm, onToggleMetronome, onBpmChange)
 
         Spacer(Modifier.height(18.dp))
         SightReadingCard(onOpenSightReading)
 
         Spacer(Modifier.height(18.dp))
-        MicPanel(detectedMidi, cents, listening, loMidi, hiMidi, solfege, onToggleListen)
+        RhythmGameCard(onOpenRhythmGame)
     }
 }
 
@@ -138,6 +142,32 @@ private fun SightReadingCard(onOpen: () -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Text("Open sight-reading", color = OnHoney, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Entry point for the rhythm game, which takes over the whole screen. */
+@Composable
+private fun RhythmGameCard(onOpen: () -> Unit) {
+    Column(Modifier.card()) {
+        Text("Practice rhythm", color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Tap along with a scrolling beat track. Levels run from steady quarter notes to " +
+                "syncopation and triplets.",
+            color = Muted, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Honey)
+                .clickable { onOpen() }
+                .padding(vertical = 13.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Open rhythm practice", color = OnHoney, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

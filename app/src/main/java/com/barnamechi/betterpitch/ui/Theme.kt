@@ -51,7 +51,7 @@ internal val keyPressSpring = spring<Float>(
     dampingRatio = 0.6f, stiffness = Spring.StiffnessHigh
 )
 
-internal val BPM_CHOICES = listOf(60, 72, 84, 96, 120)
+internal val BPM_CHOICES = listOf(40, 50, 60, 72, 84, 96, 120)
 
 internal val CardShape = RoundedCornerShape(18.dp)
 internal val ChipShape = RoundedCornerShape(10.dp)
@@ -124,4 +124,21 @@ internal fun <T> ChipRow(
 }
 
 /** The app has no navigation library; one enum plus a `when` is the whole router. */
-internal enum class Route { Home, SightReading }
+internal enum class Route { Home, SightReading, RhythmGame }
+
+/** Full-width primary action button, shared by both game screens' Start/Stop/Resume control. */
+@Composable
+internal fun PrimaryButton(text: String, danger: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (danger) Coral else Honey)
+            .clickable { onClick() }
+            .padding(vertical = 13.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (danger) OnCoral else OnHoney, fontSize = 15.sp,
+            fontWeight = FontWeight.Bold)
+    }
+}

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,7 +34,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -93,10 +93,20 @@ fun SightReadingScreen(
     onStartMetronome: () -> Unit,
     onStopMetronome: () -> Unit,
     beatNow: () -> Double,
+    playNote: (Int) -> Unit,
     onBack: () -> Unit,
 ) {
     var spacing by remember { mutableIntStateOf(1) }
-    var game by remember { mutableStateOf(Game(Staff.randomRound(ROUND_NOTES), 1)) }
+    var mode by remember { mutableStateOf(Staff.NoteMode.ALL) }
+    var rangeLow by remember { mutableIntStateOf(Staff.GAME_LOW) }
+    var rangeHigh by remember { mutableIntStateOf(Staff.GAME_HIGH) }
+    // Falls back to the un-filtered range pool rather than crashing when a narrow range plus a
+    // line/space mode leaves nothing to draw from (e.g. a one-note range of the wrong parity).
+    fun currentPool(): IntArray {
+        val ranged = Staff.naturalsInRange(rangeLow, rangeHigh)
+        return Staff.filterMode(ranged, mode).ifEmpty { ranged }
+    }
+    var game by remember { mutableStateOf(Game(Staff.randomRound(ROUND_NOTES, currentPool()), 1)) }
     var phase by remember { mutableStateOf(Phase.Idle) }
     var correct by remember { mutableIntStateOf(0) }
     var errors by remember { mutableIntStateOf(0) }
@@ -112,7 +122,7 @@ fun SightReadingScreen(
     )
 
     fun newRound(beatsPerNote: Int) {
-        game = Game(Staff.randomRound(ROUND_NOTES), beatsPerNote)
+        game = Game(Staff.randomRound(ROUND_NOTES, currentPool()), beatsPerNote)
         correct = 0
         errors = 0
         phase = Phase.Idle
@@ -171,6 +181,7 @@ fun SightReadingScreen(
         // have entered the staff yet.
         if (game.beatOf(game.target) - b > game.leadBeats) return
         val ok = Staff.pitchClass(game.notes[game.target]) == pitchClass
+        if (ok) playNote(game.notes[game.target])
         game.results[game.target] = if (ok) R_CORRECT else R_WRONG
         game.judgedAt[game.target] = b
         game.target++
@@ -198,7 +209,16 @@ fun SightReadingScreen(
             ) {
                 Text("‹ Back", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                when (phase) {
+                    Phase.Idle -> "$ROUND_NOTES notes"
+                    Phase.Running, Phase.Paused -> "$correct correct · $errors errors · ${ROUND_NOTES - correct - errors} left"
+                    Phase.Finished -> "Complete — ${correct * 100 / ROUND_NOTES}%"
+                },
+                color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, modifier = Modifier.weight(1f)
+            )
             ToggleChipCompact("Solfège", solfege, onSolfegeChange)
         }
 
@@ -211,6 +231,39 @@ fun SightReadingScreen(
             label = { if (it == 1) "1 beat" else "$it beats" },
             onSelect = { if (it != spacing) { spacing = it; newRound(it) } }
         )
+        Spacer(Modifier.height(8.dp))
+        ChipRow(
+            Staff.NoteMode.entries.toList(), mode,
+            enabled = phase != Phase.Running && phase != Phase.Paused,
+            label = { when (it) {
+                Staff.NoteMode.ALL -> "All"
+                Staff.NoteMode.LINES -> "Lines"
+                Staff.NoteMode.SPACES -> "Spaces"
+            } },
+            onSelect = { if (it != mode) { mode = it; newRound(spacing) } }
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val rangeEnabled = phase != Phase.Running && phase != Phase.Paused
+            RangeStepper(
+                label = "Low", valueLabel = label(rangeLow, solfege),
+                canDecrease = Staff.stepDownNatural(rangeLow) != null,
+                canIncrease = Staff.stepUpNatural(rangeLow)?.let { it < rangeHigh } ?: false,
+                enabled = rangeEnabled,
+                onDecrease = { Staff.stepDownNatural(rangeLow)?.let { rangeLow = it; newRound(spacing) } },
+                onIncrease = { Staff.stepUpNatural(rangeLow)?.let { if (it < rangeHigh) { rangeLow = it; newRound(spacing) } } },
+                modifier = Modifier.weight(1f)
+            )
+            RangeStepper(
+                label = "High", valueLabel = label(rangeHigh, solfege),
+                canDecrease = Staff.stepDownNatural(rangeHigh)?.let { it > rangeLow } ?: false,
+                canIncrease = Staff.stepUpNatural(rangeHigh) != null,
+                enabled = rangeEnabled,
+                onDecrease = { Staff.stepDownNatural(rangeHigh)?.let { if (it > rangeLow) { rangeHigh = it; newRound(spacing) } } },
+                onIncrease = { Staff.stepUpNatural(rangeHigh)?.let { rangeHigh = it; newRound(spacing) } },
+                modifier = Modifier.weight(1f)
+            )
+        }
 
         Spacer(Modifier.height(14.dp))
         // The staff absorbs the leftover height, so short screens shrink the staff rather than
@@ -236,27 +289,6 @@ fun SightReadingScreen(
             )
         }
 
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Stat("Correct", "$correct", Mint, Modifier.weight(1f))
-            Stat("Errors", "$errors", Coral, Modifier.weight(1f))
-            if (phase == Phase.Finished) {
-                Stat("Accuracy", "${correct * 100 / ROUND_NOTES}%", TextC, Modifier.weight(1f))
-            } else {
-                Stat("Left", "${ROUND_NOTES - correct - errors}", TextC, Modifier.weight(1f))
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-        Text(
-            when (phase) {
-                Phase.Idle -> "$ROUND_NOTES notes. Name each one before it passes the amber line."
-                Phase.Running -> "Answer the note nearest the line."
-                Phase.Paused -> "Paused. Resume picks up where you left off."
-                Phase.Finished -> "Round complete."
-            },
-            color = Muted, fontSize = 12.sp
-        )
         Spacer(Modifier.height(8.dp))
         AnswerPad(solfege, phase == Phase.Running) { pc -> answer(pc) }
 
@@ -323,19 +355,45 @@ private fun AnswerKey(text: String, enabled: Boolean, modifier: Modifier, onPres
     }
 }
 
+/** Low/High range control: steps one natural letter at a time, same chip visual language as the
+ *  rest of the game's controls. Used to bound which notes a round can draw from. */
 @Composable
-private fun Stat(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Column(
+private fun RangeStepper(
+    label: String, valueLabel: String,
+    canDecrease: Boolean, canIncrease: Boolean, enabled: Boolean,
+    onDecrease: () -> Unit, onIncrease: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
         modifier
             .clip(ChipShape)
             .background(Well)
             .border(1.dp, Line, ChipShape)
-            .padding(vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label.uppercase(), color = Muted, fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
-        Text(value, color = color, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+        Text(label, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.weight(1f))
+        StepperButton("−", enabled && canDecrease, onDecrease)
+        Text(
+            valueLabel, color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        StepperButton("+", enabled && canIncrease, onIncrease)
+    }
+}
+
+@Composable
+private fun StepperButton(symbol: String, enabled: Boolean, onPress: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) Honey else dim(Honey))
+            .clickable(enabled = enabled) { onPress() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(symbol, color = if (enabled) OnHoney else dim(OnHoney), fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -354,18 +412,3 @@ private fun ToggleChipCompact(text: String, checked: Boolean, onChange: (Boolean
     }
 }
 
-@Composable
-private fun PrimaryButton(text: String, danger: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (danger) Coral else Honey)
-            .clickable { onClick() }
-            .padding(vertical = 13.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, color = if (danger) OnCoral else OnHoney, fontSize = 15.sp,
-            fontWeight = FontWeight.Bold)
-    }
-}

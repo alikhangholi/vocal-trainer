@@ -144,16 +144,20 @@ class ToneEngine {
     /** Held note that does not decay until [noteOff]. */
     fun noteOn(freq: Double) = allocate(freq, held = true)
 
+    /** Short percussive tap-feedback click for the rhythm game - same voices/thread as [strike],
+     *  just a fixed short decay instead of the pitch-dependent piano-like one. */
+    fun clickHit(freq: Double = 1500.0, decaySec: Double = 0.05) = allocate(freq, held = false, decaySec = decaySec)
+
     /** Damper on struck notes. */
     fun damp() = release(heldVoices = false)
 
     /** Release held (sustain) notes. */
     fun noteOff() = release(heldVoices = true)
 
-    private fun allocate(freq: Double, held: Boolean) {
+    private fun allocate(freq: Double, held: Boolean, decaySec: Double? = null) {
         val sr = (track?.sampleRate?.takeIf { it > 0 } ?: REQUESTED_RATE).toDouble()
         // -60 dB in decaySec; a high note rings shorter than a low one, like a piano.
-        val decaySec = (2.5 * (440.0 / freq).pow(0.35)).coerceIn(0.4, 4.0)
+        val effectiveDecaySec = decaySec ?: (2.5 * (440.0 / freq).pow(0.35)).coerceIn(0.4, 4.0)
         synchronized(lock) {
             val v = voices.firstOrNull { !it.active } ?: voices.minByOrNull { it.env } ?: voices[0]
             v.active = false            // pause the render loop's use of it while we re-arm
@@ -161,7 +165,7 @@ class ToneEngine {
             for (h in v.phase.indices) v.phase[h] = 0.0
             v.env = 0.0
             v.attackStep = 1.0 / (ATTACK_SEC * sr)
-            v.decayCoef = exp(-MINUS_60_DB / (decaySec * sr))
+            v.decayCoef = exp(-MINUS_60_DB / (effectiveDecaySec * sr))
             v.releaseCoef = exp(-MINUS_60_DB / (RELEASE_SEC * sr))
             v.held = held
             v.releasing = false
