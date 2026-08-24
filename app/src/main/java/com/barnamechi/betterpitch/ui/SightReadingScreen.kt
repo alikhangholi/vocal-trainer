@@ -104,7 +104,8 @@ fun SightReadingScreen(
     // line/space mode leaves nothing to draw from (e.g. a one-note range of the wrong parity).
     fun currentPool(): IntArray {
         val ranged = Staff.naturalsInRange(rangeLow, rangeHigh)
-        return Staff.filterMode(ranged, mode).ifEmpty { ranged }
+        val filtered = Staff.filterMode(ranged, mode)
+        return if (filtered.isEmpty()) ranged else filtered
     }
     var game by remember { mutableStateOf(Game(Staff.randomRound(ROUND_NOTES, currentPool()), 1)) }
     var phase by remember { mutableStateOf(Phase.Idle) }
