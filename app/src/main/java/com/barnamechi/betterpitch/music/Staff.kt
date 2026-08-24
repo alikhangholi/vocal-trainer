@@ -36,6 +36,26 @@ object Staff {
 
     fun pitchClass(midi: Int): Int = pc(midi)
 
-    fun randomRound(count: Int, rng: Random = Random.Default): IntArray =
-        IntArray(count) { NATURALS[rng.nextInt(NATURALS.size)] }
+    /** Which staff position a note sits on. Lines are drawn at odd steps, spaces at even steps -
+     *  see StaffCanvas's BOTTOM_LINE_STEP..TOP_LINE_STEP `step 2` line loop. The parity holds
+     *  through ledger lines too, so this works for any natural in NATURALS unchanged. */
+    enum class NoteMode { ALL, LINES, SPACES }
+
+    fun isLine(midi: Int): Boolean = step(midi) % 2 == (BOTTOM_LINE_STEP % 2)
+
+    fun filterMode(pool: IntArray, mode: NoteMode): IntArray = when (mode) {
+        NoteMode.ALL -> pool
+        NoteMode.LINES -> pool.filter(::isLine).toIntArray()
+        NoteMode.SPACES -> pool.filterNot(::isLine).toIntArray()
+    }
+
+    /** Naturals within [low, high], inclusive. Used to build the game's configurable-range pool. */
+    fun naturalsInRange(low: Int, high: Int): IntArray = (low..high).filter(::isNatural).toIntArray()
+
+    /** The steppers in the range UI walk this ladder one natural letter at a time. */
+    fun stepDownNatural(midi: Int): Int? = NATURALS.lastOrNull { it < midi }
+    fun stepUpNatural(midi: Int): Int? = NATURALS.firstOrNull { it > midi }
+
+    fun randomRound(count: Int, pool: IntArray, rng: Random = Random.Default): IntArray =
+        IntArray(count) { pool[rng.nextInt(pool.size)] }
 }

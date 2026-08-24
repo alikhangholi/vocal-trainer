@@ -11,8 +11,11 @@ import androidx.core.content.ContextCompat
 import com.barnamechi.betterpitch.audio.Metronome
 import com.barnamechi.betterpitch.audio.PitchEngine
 import com.barnamechi.betterpitch.audio.ToneEngine
+import com.barnamechi.betterpitch.data.RhythmProgress
 import com.barnamechi.betterpitch.music.Notes
+import com.barnamechi.betterpitch.music.Rhythm
 import com.barnamechi.betterpitch.ui.BetterPitchScreen
+import com.barnamechi.betterpitch.ui.RhythmGameScreen
 import com.barnamechi.betterpitch.ui.Route
 import com.barnamechi.betterpitch.ui.SightReadingScreen
 
@@ -21,6 +24,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var tone: ToneEngine
     private val metronome = Metronome()
     private var pitch: PitchEngine? = null
+    private lateinit var rhythmProgress: RhythmProgress
 
     private val detectedMidi = mutableStateOf<Int?>(null)
     private val cents = mutableStateOf(0)
@@ -31,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private val bpm = mutableStateOf(60)
     private val solfege = mutableStateOf(false)
     private val route = mutableStateOf(Route.Home)
+    private val rhythmUnlockedThrough = mutableStateOf(1)
+    private val rhythmBestScores = mutableStateOf<Map<Int, Int>>(emptyMap())
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -40,6 +46,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tone = ToneEngine().also { it.start() }
+        rhythmProgress = RhythmProgress(this)
+        rhythmUnlockedThrough.value = rhythmProgress.unlockedThrough()
+        rhythmBestScores.value = Rhythm.LEVELS.associate { it.id to rhythmProgress.bestAccuracy(it.id) }
 
         setContent {
             when (route.value) {
@@ -62,6 +71,7 @@ class MainActivity : ComponentActivity() {
                     solfege = solfege.value,
                     onSolfegeChange = { solfege.value = it },
                     onOpenSightReading = { route.value = Route.SightReading },
+                    onOpenRhythmGame = { route.value = Route.RhythmGame },
                 )
 
                 Route.SightReading -> SightReadingScreen(
@@ -74,6 +84,27 @@ class MainActivity : ComponentActivity() {
                     onStartMetronome = { if (!metronomeOn.value) toggleMetronome() },
                     onStopMetronome = { if (metronomeOn.value) toggleMetronome() },
                     beatNow = { metronome.audibleBeat() },
+                    playNote = { m -> tone.strike(Notes.midiToFreq(m)) },
+                    onBack = { route.value = Route.Home },
+                )
+
+                Route.RhythmGame -> RhythmGameScreen(
+                    bpm = bpm.value,
+                    onBpmChange = { v -> setBpm(v) },
+                    metronomeOn = metronomeOn.value,
+                    beatsPerBar = metronome.beatsPerBar,
+                    onStartMetronome = { if (!metronomeOn.value) toggleMetronome() },
+                    onStopMetronome = { if (metronomeOn.value) toggleMetronome() },
+                    beatNow = { metronome.audibleBeat() },
+                    onTapSound = { tone.clickHit() },
+                    unlockedThrough = rhythmUnlockedThrough.value,
+                    bestScores = rhythmBestScores.value,
+                    onLevelResult = { levelId, accuracyPercent, passed ->
+                        rhythmProgress.recordResult(levelId, accuracyPercent, passed)
+                        rhythmUnlockedThrough.value = rhythmProgress.unlockedThrough()
+                        rhythmBestScores.value = rhythmBestScores.value +
+                            (levelId to maxOf(rhythmBestScores.value[levelId] ?: 0, accuracyPercent))
+                    },
                     onBack = { route.value = Route.Home },
                 )
             }
@@ -127,10 +158,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // The sight-reading frame loop freezes when the window goes away, but the click track
-        // wouldn't - coming back would score every note that elapsed as a miss. Stopping the
-        // metronome pauses the round instead. Home keeps its click running, as it always has.
-        if (route.value == Route.SightReading && metronomeOn.value) {
+        // Both games' frame loops freeze when the window goes away, but the click track wouldn't -
+        // coming back would score everything that elapsed while backgrounded as missed. Stopping
+        // the metronome pauses the round instead. Home keeps its click running, as it always has.
+        val pausesOnStop = route.value == Route.SightReading || route.value == Route.RhythmGame
+        if (pausesOnStop && metronomeOn.value) {
             metronome.stop()
             metronomeOn.value = false
         }
