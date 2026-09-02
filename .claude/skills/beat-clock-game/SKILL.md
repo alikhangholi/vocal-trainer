@@ -1,6 +1,6 @@
 ---
 name: beat-clock-game
-description: Work on betterPitch's metronome-synced games. Use for any change to SightReadingScreen, RhythmGameScreen, StaffCanvas, RhythmTrackCanvas, music/Rhythm.kt or music/Staff.kt, and for requests like "add a rhythm level", "tune the hit windows", "change the note pool or range", "the notes drift from the click", "scoring feels wrong", "the game stutters", or "build another practice game".
+description: Work on betterPitch's metronome-synced games. Use for any change to SightReadingScreen, RhythmGameScreen, StaffCanvas, RhythmTrackCanvas, music/Rhythm.kt, music/Notation.kt or music/Staff.kt, and for requests like "add a rhythm level", "add a time signature", "tune the hit windows", "change the note pool or range", "fix the beaming", "the notes drift from the click", "scoring feels wrong", "the game stutters", or "build another practice game".
 ---
 
 # Beat-clock games in betterPitch
@@ -66,10 +66,17 @@ LaunchedEffect(phase, round) {
 - Deadline catch-up is a **`while`, not an `if`** — a dropped frame must not skip an item.
 
 ### 5. Anchoring and the metronome contract
-- `anchorAt(clockNow, fromIndex, beatsPerBar)` sets
-  `origin = ceil((clockNow + leadBeats + 1.0 - onsetOf(fromIndex)) / beatsPerBar) * beatsPerBar` —
-  one full lead-in away, rounded up to a bar line so the round starts *with* the accented click.
-  Resume re-anchors from the current `target`.
+- `anchorAt(clockNow, fromIndex, countInBars)` sets
+  `origin = ceil((clockNow + leadBeats + 1.0 - onsetOf(fromIndex)) / beatsPerBar) * beatsPerBar
+  + countInBars * beatsPerBar` — one full lead-in away, rounded up to a bar line so the round starts
+  *with* the accented click, plus the count-in. The count-in is whole **bars** precisely so `origin`
+  stays a multiple of `beatsPerBar` and that alignment survives. Resume re-anchors from the current
+  `target` with `countInBars = 0`; a mid-round count-in would make `nowBeat` negative against a
+  mid-round origin, which the canvas's count-in row reads as "before the first note".
+- `beatsPerBar` is the **level's** (`level.meter.beatsPerBar`), pushed straight into
+  `Metronome.setBeatsPerBar`, never routed through a `mutableStateOf` — a value that only lands on
+  the next composition would anchor the round on a different bar length than the click is using.
+  Restore 4 from `onDispose`, on every exit path.
 - `val wasClickingOnEntry = remember { metronomeOn }` +
   `stopIfOurs = { if (!wasClickingOnEntry) onStopMetronome() }` in `rememberUpdatedState`, called on
   finish, on leave, and from `onDispose`. **Never clobber a click the user started on the home
@@ -84,20 +91,40 @@ LaunchedEffect(phase, round) {
 
 ## Recipe: add a rhythm level
 
-1. **Patterns** in `music/Rhythm.kt`, from the helpers `q()` quarter, `h()` half, `e()` eighth,
-   `s()` sixteenth, `dq()` dotted quarter, `t()` triplet eighth, `qr()`/`er()` rests, `tie(beats)`
-   for a tied/long note. Each `pattern(...)` should total `beatsPerBar` (4) unless you mean
-   otherwise. Draw whole patterns, not random durations — a round should read as a phrase.
-2. **`RhythmLevel` entry**: `id` (contiguous from 1 — unlocking is sequential), `title`,
-   `description`, `bpmRange`, patterns, `perfectWindowBeats`, `goodWindowBeats`, `passAccuracy`
-   (0.85 everywhere so far), optional `passPerfectRatio` (levels 7–9 use 0.60–0.65).
-3. **`bpmRange` must intersect `BPM_CHOICES`** (`40, 50, 60, 72, 84, 96, 120` in `ui/Theme.kt`).
+1. **Patterns** in `music/Rhythm.kt`, from the helpers `q()` quarter, `h()` half, `dh()` dotted
+   half, `e()` eighth, `s()` sixteenth, `dq()` dotted quarter, `t()` triplet eighth, `qr()`/`er()`
+   rests, and `tied(...)` for a note held into the next event. Wrap each in the helper for its
+   meter — `p44`, `p34`, `p68` — which **checks the bar adds up and throws at class-init if it
+   doesn't**. Draw whole patterns, not random durations: a round should read as a phrase.
+2. **`RhythmLevel` entry**: `id` (**append — never renumber**, best scores are keyed
+   `level_{id}_best`), `title`, `description`, `meter`, `bpmRange`, patterns,
+   `perfectWindowBeats`, `goodWindowBeats`, `passAccuracy` (0.85 everywhere so far), optional
+   `passPerfectRatio`. Nothing is locked, so the id is display order and nothing more.
+3. **`goodWindowBeats` must stay under half the level's smallest note-to-note gap**, or a tap aimed
+   at one note gets credited to the one before it — the single `target` cursor cannot tell them
+   apart. Sixteenths and 6/8 eighths both sit at 0.12.
+4. **`bpmRange` must intersect `BPM_CHOICES`** (`40, 50, 60, 72, 84, 96, 120` in `ui/Theme.kt`).
    `RhythmPlayScreen` filters the tempo chips by it and falls back to `bpmRange.first` if the
-   intersection is empty — which would offer a tempo that has no chip.
-4. **Decide about level 9.** `LEVEL_9_PATTERNS` is the union of 5–8, so adding patterns to those
-   levels automatically feeds it. A new level only reaches 9 if you add it to that union.
-5. Windows tighten across the curriculum (0.12/0.25 → 0.05/0.12 beats). Place a new level's windows
+   intersection is empty — which would offer a tempo that has no chip. In compound meter these are
+   **dotted-quarter** tempos: keep them low, since 72 is already 216 eighths a minute.
+5. **Decide about level 9.** `LEVEL_9_PATTERNS` is the union of 5–8, so adding patterns to those
+   levels automatically feeds it — which also means **never put a non-4/4 pattern in 5–8**, or
+   level 9 mixes meters and fails its own bar check.
+6. Windows tighten across the curriculum (0.12/0.25 → 0.05/0.12 beats). Place a new level's windows
    consistently with its neighbours.
+
+## Recipe: notation
+
+Engraving lives in `music/Notation.kt` (`RhythmLayout`), computed once per round and immutable
+after; the canvas only draws. Structure is in **integer ticks** (`TICKS_PER_WHOLE = 1920`) because
+every grouping question is a boundary equality that floats get wrong — three 6/8 eighths summed as
+`1f/3f` land in the wrong beat. Beats stay floats for scrolling and scoring only.
+
+A beam group is a run of adjacent flagged notes inside one `meter.beatTicks` cell; a rest, a
+quarter-or-longer, a different tuplet, or a note spilling out of its cell all break it, and a group
+of one keeps its flag. Since `beatTicks` is the click period *and* the beam cell, 4/4 beams eighths
+in pairs and 6/8 beams them in threes with no special case. **No music font, ever** — see
+`StaffCanvas.drawClef`.
 
 ## Recipe: tune hit windows
 Windows are **beat fractions**, so they are already tempo-independent — that is the whole design.

@@ -35,7 +35,6 @@ class MainActivity : ComponentActivity() {
     private val bpm = mutableStateOf(60)
     private val solfege = mutableStateOf(false)
     private val route = mutableStateOf(Route.Home)
-    private val rhythmUnlockedThrough = mutableStateOf(1)
     private val rhythmBestScores = mutableStateOf<Map<Int, Int>>(emptyMap())
 
     private val micPermission =
@@ -47,7 +46,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         tone = ToneEngine().also { it.start() }
         rhythmProgress = RhythmProgress(this)
-        rhythmUnlockedThrough.value = rhythmProgress.unlockedThrough()
         rhythmBestScores.value = Rhythm.LEVELS.associate { it.id to rhythmProgress.bestAccuracy(it.id) }
 
         setContent {
@@ -92,16 +90,18 @@ class MainActivity : ComponentActivity() {
                     bpm = bpm.value,
                     onBpmChange = { v -> setBpm(v) },
                     metronomeOn = metronomeOn.value,
-                    beatsPerBar = metronome.beatsPerBar,
                     onStartMetronome = { if (!metronomeOn.value) toggleMetronome() },
                     onStopMetronome = { if (metronomeOn.value) toggleMetronome() },
+                    // Straight to the engine, deliberately not through a mutableStateOf: the
+                    // rhythm screen anchors a round on this the moment it sets it, and a value
+                    // that only lands on the next composition would put the round's barlines a
+                    // frame out of step with the accent.
+                    onBeatsPerBarChange = { n -> metronome.setBeatsPerBar(n) },
                     beatNow = { metronome.audibleBeat() },
                     onTapSound = { tone.clickHit() },
-                    unlockedThrough = rhythmUnlockedThrough.value,
                     bestScores = rhythmBestScores.value,
-                    onLevelResult = { levelId, accuracyPercent, passed ->
-                        rhythmProgress.recordResult(levelId, accuracyPercent, passed)
-                        rhythmUnlockedThrough.value = rhythmProgress.unlockedThrough()
+                    onLevelResult = { levelId, accuracyPercent ->
+                        rhythmProgress.recordResult(levelId, accuracyPercent)
                         rhythmBestScores.value = rhythmBestScores.value +
                             (levelId to maxOf(rhythmBestScores.value[levelId] ?: 0, accuracyPercent))
                     },

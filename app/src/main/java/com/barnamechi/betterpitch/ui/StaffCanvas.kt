@@ -31,14 +31,6 @@ internal const val R_MISSED: Byte = 3
 internal const val NOTES_VISIBLE = 3.5f
 
 /**
- * Largest a staff space is allowed to get. The canvas fills whatever height the card gives it,
- * which on a tall phone is ~420dp - nine times more than a staff wants. Every dimension below is a
- * multiple of `gap`, so capping it here scales the whole staff, notes included, and leaves it
- * centred in the card.
- */
-private val MAX_STAFF_GAP = 12.dp
-
-/**
  * The scrolling treble staff.
  *
  * Everything is laid out from [nowBeat], which is read **inside the draw lambda only**: a snapshot

@@ -86,9 +86,16 @@ window is invisible. Judgement is a *catch-up* `while`, not an `if` — a droppe
 a note.
 
 **5. `anchorAt()` places the round on a bar accent.**
-`origin = ceil((clockNow + leadBeats + 1.0 - beatOf(fromIndex)) / beatsPerBar) * beatsPerBar` — one
-full lead-in away from the judgement line, rounded up to a bar line so the round starts *with* the
-accented click. Resuming from a pause re-anchors from the current target index.
+`origin = ceil((clockNow + leadBeats + 1.0 - beatOf(fromIndex)) / beatsPerBar) * beatsPerBar
++ countInBars * beatsPerBar` — one full lead-in away from the judgement line, rounded up to a bar
+line so the round starts *with* the accented click, plus the rhythm game's count-in. The count-in is
+a whole number of bars precisely so `origin` stays a multiple of `beatsPerBar` and that alignment
+survives. Resuming from a pause re-anchors from the current target index and counts in zero bars.
+
+`beatsPerBar` is the *level's*, not a screen parameter: the rhythm game reads
+`level.meter.beatsPerBar` and pushes the same number straight into `Metronome.setBeatsPerBar`.
+Routing it through a `mutableStateOf` would let a round be anchored on last composition's bar
+length while the click already used the new one.
 
 **6. Never clobber a click the user started themselves.**
 `val wasClickingOnEntry = remember { metronomeOn }`, then
@@ -116,9 +123,21 @@ themselves — they never iterate the whole round.
   arithmetic: no search, no allocation. `gap` (one staff line-gap) is the unit for *every* dimension,
   capped by `MAX_STAFF_GAP` so a tall card doesn't blow the staff up. Verdict bytes: `R_PENDING`,
   `R_CORRECT`, `R_WRONG`, `R_MISSED`.
-- **`RhythmTrackCanvas`** — durations are non-uniform, so the window comes from `lowerBound()`, a
-  binary search over the precomputed `onsetBeat` array. Verdict bytes: `RR_PENDING`, `RR_PERFECT`,
-  `RR_GOOD`, `RR_MISSED`. Rests draw as an empty gap.
+- **`RhythmTrackCanvas`** — real notation on a five-line staff: neutral clef, time signature,
+  barlines, noteheads, stems, beams, flags, dots, ties, rest glyphs and triplet brackets, all from
+  `DrawScope` primitives and `Path`. Durations are non-uniform, so the window comes from
+  `lowerBound()` over the precomputed `onsetBeat` array, then widens to whole beam groups via
+  `beamFirst`/`beamLast` — a group straddling the window edge must still draw as one beam. Verdict
+  bytes: `RR_PENDING`, `RR_PERFECT`, `RR_GOOD`, `RR_MISSED`.
+  - **No music font, ever.** The 𝄞 reasoning in `StaffCanvas.drawClef` covers the whole SMuFL set:
+    Android devices don't ship one, and a missing glyph is a tofu box you cannot detect at runtime.
+  - All heads sit on the middle line, so stems are uniform and **beams are horizontal** — the slant
+    and stem-length optimisation that dominates a real beaming engine is simply not needed here.
+  - The header (clef + time signature) is painted **last**, over an opaque `Surface` rect with the
+    staff lines restored across it. Notes scroll to `x = 0`, and one sliding through the clef reads
+    as a bug.
+  - Everything the engraver needs is precomputed in `music/RhythmLayout`; the canvas never walks the
+    whole round and never allocates.
 
 Shared visual grammar: pending items `lerp(Muted, TextC, ...)` brighten as they approach so the eye
 is drawn to what's next; a judged item flashes for 0.4 beats then rides off screen as history.
@@ -143,6 +162,9 @@ these to `clickable`; the tap/drag disambiguation delay is audible.
 ---
 
 ## Known duplication to keep in sync
+
+`MAX_STAFF_GAP` lives in `Theme.kt` and is shared by both canvases — it used to be `private` in
+`StaffCanvas`. Don't copy it back.
 
 The white-key width `44.dp` appears twice: inside `Keyboard` and at the `KeyboardOverview` call site
 in `BetterPitchScreen` (`contentWidth = 44.dp * whiteKeyCount`). Change one, change the other, or the

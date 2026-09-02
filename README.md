@@ -8,14 +8,19 @@ the key you sing lights up green, with a live tuning meter and a session range f
 - `app/src/main/java/com/barnamechi/betterpitch/`
   - `music/Notes.kt` — MIDI↔frequency, note names, solfège, cents
   - `music/Staff.kt` — treble-staff geometry for the sight-reading game
+  - `music/Rhythm.kt` — note values, meters (4/4, 3/4, 6/8) and the 13-level rhythm curriculum
+  - `music/Notation.kt` — engraving layout: onsets in ticks, beam groups, ties
   - `audio/ToneEngine.kt` — continuous tone synthesis (AudioTrack); `noteOn`/`noteOff`
   - `audio/PitchEngine.kt` — mic capture + autocorrelation pitch detection (AudioRecord)
   - `audio/Metronome.kt` — the click track and the beat clock the game reads
   - `MainActivity.kt` — RECORD_AUDIO permission, engine ownership, state
   - `ui/BetterPitchScreen.kt` — keyboard, sustain/solfège toggles, metronome + mic panels
   - `ui/SightReadingScreen.kt` + `ui/StaffCanvas.kt` — the note-reading game
+  - `ui/RhythmGameScreen.kt` + `ui/RhythmTrackCanvas.kt` — the rhythm game, on a real
+    five-line staff with beams, ties, dots, rests and triplet brackets
 
-Every feature is free — there is no paywall, no billing SDK and no account.
+Every feature is free and every level is open — there is no paywall, no billing SDK, no
+account, and no unlock order.
 
 ## Build (on your machine — SDK required)
 This project has no Gradle wrapper binary committed. Generate it once, then build:

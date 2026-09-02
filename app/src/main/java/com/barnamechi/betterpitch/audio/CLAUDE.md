@@ -101,8 +101,14 @@ window rather than widening it.
 - **The metronome click is intentionally *not* self-gated.** Only `ToneEngine` feeds
   `isSounding()`. The click is too short to pass `PitchEngine`'s periodicity gate, so you can sing
   along with the click while listening.
-- **`beat` and `beatIndex` are two separate counters** in `Metronome`'s loop: `beat` is position
-  within the bar (drives the accent), `beatIndex` is the absolute count (drives the clock).
+- **The accent is derived from `beatIndex`, not counted separately.** There used to be a second
+  `beat` counter wrapping at the bar length; it was merged away when `setBeatsPerBar` arrived.
+  A wrapping counter and `beatIndex % beatsPerBar` agree only while the bar length never changes —
+  change it mid-bar and the accent drifts off the absolute grid that `anchorAt`'s
+  `ceil(x / beatsPerBar) * beatsPerBar` assumes, so a round would start on an *unaccented* click.
+  It looks fine and feels wrong, which is the worst kind of bug here. `beatsPerBar` is read once
+  per buffer, and the setter clamps to 1..12 — a zero would throw `ArithmeticException` on the
+  render thread, and because `running` stays true the clock would silently freeze rather than fail.
 - **`ToneEngine.clickHit()` reuses the piano voices**, just with a fixed 0.05 s decay instead of the
   pitch-dependent one. It is not a separate sound path.
 - **Higher notes decay faster** — `2.5 * (440/freq)^0.35` clamped to 0.4–4.0 s — because that is

@@ -53,6 +53,14 @@ internal val keyPressSpring = spring<Float>(
 
 internal val BPM_CHOICES = listOf(40, 50, 60, 72, 84, 96, 120)
 
+/**
+ * Largest a staff space is allowed to get, shared by both notation canvases. Each fills whatever
+ * height its card gives it, which on a tall phone is far more than a staff wants; every dimension
+ * in both is a multiple of the gap, so capping it here scales the whole staff - notes included -
+ * and leaves it centred in the card.
+ */
+internal val MAX_STAFF_GAP = 12.dp
+
 internal val CardShape = RoundedCornerShape(18.dp)
 internal val ChipShape = RoundedCornerShape(10.dp)
 

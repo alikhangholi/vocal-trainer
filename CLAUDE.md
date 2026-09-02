@@ -2,8 +2,8 @@
 
 Native Kotlin + Jetpack Compose Android app for ear and rhythm training. One activity, three
 screens: a reference keyboard with live mic pitch detection, a scrolling sight-reading game, and a
-levelled rhythm game. Every feature is free — there is no paywall, no billing SDK, no account, and
-no network layer.
+levelled rhythm game notated on a real staff. Every feature is free and every level is open — there
+is no paywall, no billing SDK, no account, no unlock order, and no network layer.
 
 Repo is `vocal-trainer`; the app is `betterPitch` (`com.barnamechi.betterpitch`).
 
@@ -80,7 +80,8 @@ a navigation library (`Route` enum + `when` is the router), a repository layer, 
 | `music/` | Pure music domain — no Android imports. See `music/CLAUDE.md` |
 | `music/Notes.kt` | MIDI ↔ frequency, note names, solfège, cents, C2–C6 range |
 | `music/Staff.kt` | Treble-staff geometry in diatonic "steps"; the sight-reading note pool |
-| `music/Rhythm.kt` | The 9-level rhythm curriculum, patterns, and hit windows |
+| `music/Rhythm.kt` | Note values, meters, the 13-level rhythm curriculum, and hit windows |
+| `music/Notation.kt` | `RhythmLayout` — onsets, beam groups, ties, tap eligibility, per round |
 | `audio/` | Three hand-rolled realtime engines. See `audio/CLAUDE.md` |
 | `audio/ToneEngine.kt` | 4-voice additive synth (`strike`/`noteOn`/`damp`/`noteOff`/`clickHit`) |
 | `audio/PitchEngine.kt` | Mic capture + autocorrelation pitch detection |
@@ -90,7 +91,7 @@ a navigation library (`Route` enum + `when` is the router), a repository layer, 
 | `ui/Theme.kt` | The single source of colours, shapes, shared widgets, and `Route` |
 | `ui/BetterPitchScreen.kt` | Home: keyboard, toggles, mic panel, metronome, game entry cards |
 | `ui/SightReadingScreen.kt` + `ui/StaffCanvas.kt` | The note-reading game |
-| `ui/RhythmGameScreen.kt` + `ui/RhythmTrackCanvas.kt` | The rhythm game |
+| `ui/RhythmGameScreen.kt` + `ui/RhythmTrackCanvas.kt` | The rhythm game, on a notated staff |
 
 Nested `CLAUDE.md` files load only when Claude touches that directory — put package-specific rules
 there, not here.

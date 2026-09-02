@@ -11,7 +11,8 @@ import kotlin.math.sin
 
 /**
  * Click track. One streaming AudioTrack, one thread: a short decaying click every beat,
- * accented on the first beat of each bar of 4. No assets.
+ * accented on the first beat of each bar. Bar length is [setBeatsPerBar] - 4 by default, 3 for a
+ * 3/4 rhythm level, 2 for 6/8, where the click is the dotted quarter. No assets.
  *
  * It also publishes a beat clock ([audibleBeat]) so a visual can be locked to the click. The clock
  * is derived from the very same `beatSamples` the click is synthesised from, so any rounding drift
@@ -24,7 +25,7 @@ class Metronome {
         const val CLICK_HZ = 1000.0
         const val ACCENT_HZ = 1500.0
         const val AMP = 0.35
-        const val BEATS_PER_BAR = 4
+        const val DEFAULT_BEATS_PER_BAR = 4
         /**
          * Single knob for devices where getTimestamp() is unavailable: the fallback
          * (getPlaybackHeadPosition) excludes output latency, so visuals lead the click a little.
@@ -44,6 +45,7 @@ class Metronome {
     private var thread: Thread? = null
     @Volatile private var running = false
     @Volatile private var bpm = 60
+    @Volatile private var barBeats = DEFAULT_BEATS_PER_BAR
     @Volatile private var sampleRate = REQUESTED_RATE
 
     private val anchor = AtomicReference<Anchor?>(null)
@@ -56,11 +58,18 @@ class Metronome {
     private var tsPolledNs = 0L
     private var tsOk = false
 
-    val beatsPerBar: Int get() = BEATS_PER_BAR
+    val beatsPerBar: Int get() = barBeats
 
     fun isRunning(): Boolean = running
 
     fun setBpm(value: Int) { bpm = value.coerceIn(20, 300) }
+
+    /**
+     * How many clicks make a bar, i.e. where the accent falls. A game whose round is anchored with
+     * `ceil(x / beatsPerBar) * beatsPerBar` must set this first, or its bar lines and the accent
+     * disagree. Safe to change while running - see the accent note in [start].
+     */
+    fun setBeatsPerBar(value: Int) { barBeats = value.coerceIn(1, 12) }
 
     /**
      * Fractional beats since [start], at the instant currently reaching the speaker. Monotonic, and
@@ -132,12 +141,16 @@ class Metronome {
             val buf = ShortArray(256)
             val clickSamples = (CLICK_SEC * sr).toInt()
             var sampleInBeat = 0
-            var beat = 0
-            var beatIndex = 0L      // total beats since play(), for the clock
+            var beatIndex = 0L      // total beats since play(), for the clock and the accent
             var framesWritten = 0L  // absolute frame index of buf[0]
+            var accent = true       // beat 0 of bar 0
             while (running) {
-                // beat length is read every buffer, so a BPM change takes effect immediately
+                // Both are read every buffer, so a change to either takes effect immediately.
                 val beatSamples = (sr * 60.0 / bpm).toInt().coerceAtLeast(clickSamples + 1)
+                // The accent is derived from beatIndex rather than counted separately, so that a
+                // bar-length change cannot leave the two out of phase - which would put the accent
+                // somewhere a round anchored on ceil(x / beatsPerBar) * beatsPerBar never expects.
+                val bpb = barBeats.toLong().coerceAtLeast(1L)
                 anchor.set(
                     Anchor(
                         frame = framesWritten,
@@ -147,7 +160,7 @@ class Metronome {
                 )
                 for (i in buf.indices) {
                     val s = if (sampleInBeat < clickSamples) {
-                        val hz = if (beat == 0) ACCENT_HZ else CLICK_HZ
+                        val hz = if (accent) ACCENT_HZ else CLICK_HZ
                         val env = exp(-6.908 * sampleInBeat / clickSamples)
                         sin(2 * PI * hz * sampleInBeat / sr) * env * AMP
                     } else 0.0
@@ -155,8 +168,8 @@ class Metronome {
                     sampleInBeat++
                     if (sampleInBeat >= beatSamples) {
                         sampleInBeat = 0
-                        beat = (beat + 1) % BEATS_PER_BAR
                         beatIndex++
+                        accent = beatIndex % bpb == 0L
                     }
                 }
                 t.write(buf, 0, buf.size)
